@@ -163,6 +163,121 @@ def _start_of(ir, name):
     return next(c for c in ir.real_clips() if c.name == name).start
 
 
+def test_mixed_live_op_rolled_back_when_structural_rebuild_fails():
+    # add_marker (reversible live) + move (structural). If the rebuild import fails, the marker must
+    # be rolled back — proving the unwind runs with a NON-empty rollback stack.
+    resolve, a, b, tl = _build()
+    _media_pool(resolve).ImportTimelineFromFile = lambda path, options=None: None  # rebuild fails
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [
+        {"op": "add_marker", "clip_id": _id(ir, "intro"), "frame": 3, "color": "Red"},
+        {"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200},
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok is False
+    assert ("DeleteMarkerAtFrame", 3) in a.calls    # the marker inverse ran
+    assert a.GetMarkers() == {}                       # net zero — rolled back
+
+
+def test_irreversible_live_op_before_failed_rebuild_is_surfaced_honestly():
+    # add_track (NO inverse) + move (structural). Rebuild fails -> the track stays; the result must
+    # NOT silently claim everything is intact: it surfaces a warning naming the un-undoable op.
+    resolve, a, b, tl = _build()
+    _media_pool(resolve).ImportTimelineFromFile = lambda path, options=None: None
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [
+        {"op": "add_track", "kind": "audio", "audio_type": "stereo"},
+        {"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200},
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok is False
+    assert any("NOT scriptable to undo" in w for w in res.warnings)
+
+
+def test_export_failure_aborts_before_any_import():
+    resolve, a, b, tl = _build()
+    tl.Export = lambda *a, **k: None  # Resolve's falsy-on-failure for the export step
+    mp = _media_pool(resolve)
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200}]})
+    res = adapter.apply(plan, session)
+    assert res.ok is False
+    assert any("export failed" in e for e in res.errors)
+    assert mp.imported_timelines == []  # never reached the import
+
+
+def test_mixed_plan_surfaces_rebuild_warning_and_applies_both():
+    resolve, a, b, tl = _build()
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [
+        {"op": "add_marker", "clip_id": _id(ir, "intro"), "frame": 4, "color": "Blue"},
+        {"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200},
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    assert a.GetMarkers()                                       # live marker applied
+    assert _start_of(_rebuilt_ir(resolve), "midshot") == 200    # structural move landed
+    assert any("rebuild" in w for w in res.warnings)            # lossy warning survived the merge
+
+
+def test_reresolve_remaps_clip_id_when_export_drifts_position(monkeypatch):
+    # Force the exported OTIO to put midshot at a drifted start so its content-id changes; the plan
+    # (authored against the original id) must still land via IdMap.reresolve, with a warning.
+    import opentimelineio as otio
+    resolve, a, b, tl = _build()
+
+    def drifted_export(path, *args, **kw):
+        rate = 24.0
+
+        def rt(f):
+            return otio.opentime.RationalTime(f, rate)
+
+        t = otio.schema.Timeline(name="drift")
+        t.global_start_time = rt(0)
+        v = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+        v.append(otio.schema.Clip(name="intro",
+                 media_reference=otio.schema.ExternalReference(target_url="/media/intro.mov"),
+                 source_range=otio.opentime.TimeRange(rt(0), rt(48))))
+        # a 1-frame gap pushes midshot's START to 49 -> different content-derived id -> reresolve.
+        v.append(otio.schema.Gap(source_range=otio.opentime.TimeRange(rt(0), rt(1))))
+        v.append(otio.schema.Clip(name="midshot",
+                 media_reference=otio.schema.ExternalReference(target_url="/media/midshot.mov"),
+                 source_range=otio.opentime.TimeRange(rt(0), rt(72))))
+        t.tracks.append(v)
+        otio.adapters.write_to_file(t, path)
+        return True
+
+    monkeypatch.setattr(tl, "Export", drifted_export)
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200}]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    assert any("re-resolved clip" in w for w in res.warnings)
+    assert _start_of(_rebuilt_ir(resolve), "midshot") == 200
+
+
+def test_native_call_phantom_method_raises():
+    from filmgrip.adapters.resolve_adapter import _native_call
+    from filmgrip.adapters.resolve_client import ResolveOperationFailed
+
+    class _Phantom:  # mimic fusionscript: any attribute resolves to None
+        def __getattr__(self, name):
+            return None
+
+    with pytest.raises(ResolveOperationFailed, match="no callable 'DeleteClips'"):
+        _native_call(_Phantom(), "DeleteClips", [])
+
+
 def test_ripple_delete_is_live_and_closes_the_gap_natively():
     # A ripple-delete (lift + close the gap) is the core "cut this out" primitive. delete is a live
     # op, so it stays on the fast-path and hands ripple=True to Resolve's DeleteClips, which closes

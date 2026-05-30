@@ -132,6 +132,9 @@ def live_controller(session, *, adapter=None) -> PanelController:
         # Re-snapshot so the panel always plans against the current timeline state.
         cur_ir = adapter.snapshot(session)
         cur_sel = adapter.get_selection(session, cur_ir)
+        if not cur_sel.ids:
+            return PanelResult(False, "Select a clip in Resolve first (a timeline clip or a "
+                               "media-pool item), then type your instruction.")
         ctx = PlannerContext(ir=cur_ir, selection=cur_sel, source=session, adapter=adapter)
         result = plan_with_repair(ctx, prompt, ClaudeAgentTransport())
         if result.plan is None or not result.ok:

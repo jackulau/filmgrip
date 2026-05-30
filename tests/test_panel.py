@@ -65,6 +65,21 @@ def test_run_edit_exception_becomes_panel_error_not_crash():
     assert res.ok is False and "planner exploded" in res.text
 
 
+def test_live_controller_blocks_apply_when_nothing_selected():
+    from filmgrip.adapters.base import Selection as _Sel  # noqa: F401  (kept for parity)
+    from tests.fakes import FakeMediaPool, FakeProject, FakeResolve, FakeTimeline, FakeTimelineItem
+
+    tl = FakeTimeline("T")
+    tl.add_track("video", 1, [FakeTimelineItem("solo", 0, 48)])
+    tl._current_video_item = None  # nothing selected on the timeline
+    proj = FakeProject("P", timeline=tl, media_pool=FakeMediaPool())  # empty media selection
+    session = rc.connect(FakeResolve(project=proj))
+    ctrl = live_controller(session)
+    # No selection -> Apply returns the actionable guard WITHOUT touching the planner/network.
+    res = ctrl.on_apply("add a marker")
+    assert res.ok is False and "Select a clip" in res.text
+
+
 def test_live_controller_summarizes_selection_without_network():
     # Build the live controller against a fake Resolve; it must summarize the selection (and NOT
     # call the planner — that only happens on Apply).

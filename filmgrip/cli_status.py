@@ -26,7 +26,8 @@ def status_guidance(report: dict) -> list[str]:
         return ["Open (or create) a project in Resolve."]
     if not report.get("timeline_open"):
         return ["Open a timeline in the project."]
-    return ["Ready — try: film-grip edit \"add a blue marker on the selected clip\""]
+    return ["Ready — select a clip on the timeline (or a media-pool item), then try: "
+            "film-grip edit \"add a blue marker on the selected clip\""]
 
 
 def render_status(report: dict, sfx_summary: str, editor_count: int) -> str:

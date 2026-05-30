@@ -258,12 +258,25 @@ class ResolveAdapter(GrabAdapter):
             sub = EditPlan(notes=plan.notes, ops=structural)
             res = self._apply_via_rebuild(sub, session, ir, timeline)
             if not res.ok:
-                for inv in reversed(rollback):  # unwind the in-place live/extra ops
+                reversed_count = 0
+                for inv in reversed(rollback):  # unwind the reversible in-place live ops
                     try:
                         inv()
+                        reversed_count += 1
                     except Exception:
                         pass
-                return ApplyResult(ok=False, applied=applied, errors=res.errors)
+                # Be honest: add_track/create_bin/move_to_bin have no inverse, so any of those that
+                # already ran are NOT undone. Don't claim "timeline intact" when they did.
+                irreversible = len(applied) - reversed_count
+                fail_warnings = list(warnings)
+                if irreversible > 0:
+                    fail_warnings.append(
+                        f"structural rebuild failed AFTER {len(applied)} live op(s) were applied; "
+                        f"{reversed_count} reversible one(s) were rolled back, but {irreversible} "
+                        f"(track/bin additions, media-pool moves) are NOT scriptable to undo — "
+                        f"review them in Resolve: {applied}")
+                return ApplyResult(ok=False, applied=applied, errors=res.errors,
+                                   warnings=fail_warnings)
             applied += res.applied
             warnings += res.warnings
 
@@ -349,6 +362,10 @@ class ResolveAdapter(GrabAdapter):
             raise ResolveOperationFailed(
                 f"sound effect '{op.sfx}' not found in the SFX library at {lib.base} "
                 f"(check `film-grip sfx list`)")
+        if not entry.exists(lib.base):
+            raise ResolveOperationFailed(
+                f"sound effect '{op.sfx}' resolves to '{entry.file}', but that file is missing "
+                f"under {lib.base} — fix the manifest or restore the file (`film-grip sfx list`)")
         return str(entry.path(lib.base))
 
     def _import_audio(self, op, timeline: Any, session: ResolveSession):
@@ -376,7 +393,10 @@ class ResolveAdapter(GrabAdapter):
             placed = appended[0]
             inverse = lambda: _native_call(timeline, "DeleteClips", [placed], False)  # noqa: E731
         label = op.sfx or path
-        return (f"import_audio {label} → {op.track} @ {op.at_start}", inverse, None)
+        warn = (None if op.duration is not None else
+                f"placed the FULL length of '{label}' (its duration wasn't known at validation, so "
+                f"overlap with later audio wasn't pre-checked) — trim/split it if it runs long")
+        return (f"import_audio {label} → {op.track} @ {op.at_start}", inverse, warn)
 
     def _add_track(self, op, timeline: Any):
         if op.kind == "audio":

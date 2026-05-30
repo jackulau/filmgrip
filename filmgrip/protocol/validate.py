@@ -221,8 +221,8 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                         err(ILLEGAL_OVERLAP, i, name,
                             f"audio at {op.at_start} overlaps '{hit.name}' ({hit.start}..{hit.end})",
                             None)
-                # duration None -> exact length unknown until the file is resolved; the adapter
-                # clamps/places at apply time (a warning, not a hard pre-check).
+                # duration None -> the file's full length is unknown until it's resolved, so the
+                # overlap pre-check can't run here; the adapter places the full clip and warns.
 
         elif name == "rename_track":
             if not track_exists(op.track):

@@ -115,6 +115,46 @@ def test_append_failure_aborts():
     assert any("rolled back" in e or "AppendToTimeline" in e for e in res.errors)
 
 
+def test_import_audio_missing_file_rejected_before_apply():
+    # ghost_missing -> not_here.wav is a loadable manifest entry whose file is absent; importing it
+    # must fail with a clear "missing" message, not a cryptic ImportMedia failure.
+    resolve, tl = _build_with_audio()
+    adapter = _adapter()
+    session = _session(resolve)
+    plan = EditPlan.parse({"ops": [
+        {"op": "import_audio", "track": "a1", "at_start": 120, "sfx": "ghost_missing"},
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok is False
+    assert any("missing" in e for e in res.errors)
+
+
+def test_import_audio_full_length_emits_warning():
+    resolve, tl = _build_with_audio()
+    adapter = _adapter()
+    session = _session(resolve)
+    plan = EditPlan.parse({"ops": [
+        {"op": "import_audio", "track": "a1", "at_start": 120, "sfx": "whoosh"},  # no duration
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    assert any("FULL length" in w for w in res.warnings)
+
+
+def test_import_audio_resolves_description_via_library_fallback():
+    # 'slam impact' is not an exact name -> lib.get() misses, lib.resolve() matches door_slam by tag.
+    resolve, tl = _build_with_audio()
+    adapter = _adapter()
+    session = _session(resolve)
+    mp = resolve.GetProjectManager().GetCurrentProject().GetMediaPool()
+    plan = EditPlan.parse({"ops": [
+        {"op": "import_audio", "track": "a1", "at_start": 120, "sfx": "slam impact", "duration": 20},
+    ]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    assert any("door_slam.wav" in str(p) for p in mp.imported_media)
+
+
 @pytest.mark.live
 def test_live_import_audio_smoke():
     """Real Resolve: import a tiny SFX and place it on a1. Skips unless Resolve is open."""

@@ -24,6 +24,7 @@ def test_guidance_orders_most_blocking_first():
         {"module_importable": True, "app_running": True, "is_studio": True,
          "project_open": True})[0].lower()
     assert "Ready" in status_guidance(READY)[0]
+    assert "select" in status_guidance(READY)[0].lower()  # tells the user to select a clip
 
 
 def test_render_includes_sfx_and_editors():

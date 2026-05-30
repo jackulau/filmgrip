@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""film-grip — in-Resolve panel.
+"""film-grip - in-Resolve panel.
 
 Install into Resolve's ``Fusion/Scripts/Edit`` folder (``film-grip panel install``) and launch it from
-**Workspace ▸ Scripts ▸ film-grip** inside DaVinci Resolve. It opens a floating panel where you see
-your current selection, type a natural-language instruction, and hit Apply (or Dry-run) — film-grip
+**Workspace > Scripts > film-grip** inside DaVinci Resolve. It opens a floating panel where you see
+your current selection, type a natural-language instruction, and hit Apply (or Dry-run) - film-grip
 plans the edit and applies it through the tested core.
 
 This script is a THIN translator: all behaviour lives in ``filmgrip.ui.panel`` (unit-tested with no
@@ -110,8 +110,8 @@ def main() -> int:
 
     ui, disp = _get_ui()
     if ui is None:
-        print("Fusion UIManager is unavailable — launch this from inside Resolve "
-              "(Workspace ▸ Scripts ▸ film-grip).")
+        print("Fusion UIManager is unavailable - launch this from inside Resolve "
+              "(Workspace > Scripts > film-grip).")
         return 3
 
     _build_and_run(ui, disp, live_controller(session))
