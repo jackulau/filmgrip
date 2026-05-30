@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--plan", help="apply a recorded EditPlan JSON instead of calling Claude (offline e2e)")
     edit.add_argument("--out", help="output path for fixture/interchange apply (default: <name>.edited.<ext>)")
     edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
+
+    sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
     return parser
 
 
@@ -39,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_edit import cmd_edit
 
         return cmd_edit(args)
+    if args.command == "editors":
+        from .adapters.registry import capability_markdown
+
+        print(capability_markdown())
+        return 0
     parser.print_help()
     return 0
 
