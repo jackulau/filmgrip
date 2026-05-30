@@ -111,6 +111,11 @@ def _run_live(args) -> int:
     ir = adapter.snapshot(session)
     selection = adapter.get_selection(session, ir)
 
+    # Surface the selection + how confident we are in it (Resolve has no true multi-select API).
+    conf = getattr(selection, "confidence", "precise")
+    _emit(f"# selection: {len(selection.ids)} clip(s) [{conf}]"
+          + (f" — {selection.note}" if selection.note else ""))
+
     # Build the plan: replay a recorded one, or ask Claude.
     if args.plan:
         plan = _load_recorded_plan(args.plan)
@@ -118,6 +123,12 @@ def _run_live(args) -> int:
         if not args.prompt:
             _emit("error: provide an instruction, e.g. film-grip edit \"add a blue marker on the "
                   "selected clip\"")
+            return 1
+        if not selection.ids:
+            _emit("error: no clips selected. Select a clip on the timeline (or a media-pool item) "
+                  "in Resolve, then re-run. Resolve exposes no multi-clip selection API, so "
+                  "film-grip reconstructs your selection from the current clip + media-pool "
+                  "selection — give it something to work from.")
             return 1
         from .integration.mcp_host import ClaudeAgentTransport
         from .integration.repair import plan_with_repair

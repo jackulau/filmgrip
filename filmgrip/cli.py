@@ -31,6 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
+    st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
+    st.add_argument("--sfx-dir", dest="sfx_dir", help="SFX folder to report (default: ~/.filmgrip/sfx)")
+
     sfx = sub.add_parser("sfx", help="inspect the sound-effects library Claude can pull from")
     sfx.add_argument("sfx_action", nargs="?", choices=["list", "scan", "resolve"], default="list",
                      help="list effects (default), scan the folder into a manifest, or resolve a description")
@@ -56,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
         from .audio.library import cmd_sfx
 
         return cmd_sfx(args)
+    if args.command == "status":
+        from .cli_status import cmd_status
+
+        return cmd_status(args)
     parser.print_help()
     return 0
 
