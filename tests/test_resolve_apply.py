@@ -94,16 +94,73 @@ def test_delete_maps_to_timeline_deleteclips():
     assert any(call[0] == "DeleteClips" for call in tl.calls)
 
 
-def test_non_live_ops_are_reported_for_rebuild_not_applied():
+def _media_pool(resolve):
+    return resolve.GetProjectManager().GetCurrentProject().GetMediaPool()
+
+
+def _rebuilt_ir(resolve):
+    """Read the OTIO the adapter handed to ImportTimelineFromFile — the actual rebuilt timeline."""
+    from filmgrip.core.ir import TimelineIR
+    path = _media_pool(resolve).imported_timelines[-1]
+    return TimelineIR.from_otio_file(path)
+
+
+def test_move_applies_live_via_otio_rebuild():
     resolve, a, b, tl = _build()
     adapter = ResolveAdapter()
     session = _session(resolve)
     ir = adapter.snapshot(session)
-    # a move is valid but not live-applicable -> must surface as a rebuild warning, not error
+    # A move is NOT live-applicable, so it must route through export→mutate→import and ACTUALLY
+    # take effect (the old behaviour merely warned + no-op'd).
     plan = EditPlan.parse({"ops": [{"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200}]})
     res = adapter.apply(plan, session)
-    assert res.ok
-    assert any("OTIO-rebuild" in w for w in res.warnings)
+    assert res.ok, res.errors
+    assert any(c[0] == "Export" for c in tl.calls)              # timeline was exported
+    assert _media_pool(resolve).imported_timelines                # a rebuilt timeline was imported
+    assert any("rebuild" in w for w in res.warnings)             # lossy-rebuild surfaced honestly
+    assert _start_of(_rebuilt_ir(resolve), "midshot") == 200     # the move really landed
+
+
+def test_trim_applies_live_via_otio_rebuild():
+    resolve, a, b, tl = _build()
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "trim", "clip_id": _id(ir, "midshot"), "edge": "out", "delta": -24}]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    rebuilt = _rebuilt_ir(resolve)
+    assert next(c for c in rebuilt.real_clips() if c.name == "midshot").duration == 48
+
+
+def test_split_applies_live_via_otio_rebuild():
+    resolve, a, b, tl = _build()
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "split", "clip_id": _id(ir, "midshot"), "at_frame": 84}]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    rebuilt = _rebuilt_ir(resolve)
+    halves = [c for c in rebuilt.real_clips() if c.name == "midshot"]
+    assert len(halves) == 2 and {c.duration for c in halves} == {36}
+
+
+def test_rebuild_import_failure_leaves_original_intact():
+    resolve, a, b, tl = _build()
+    # Make ImportTimelineFromFile fail silently (Resolve's falsy-on-failure behaviour).
+    _media_pool(resolve).ImportTimelineFromFile = lambda path, options=None: None
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "move", "clip_id": _id(ir, "midshot"), "to_start": 200}]})
+    res = adapter.apply(plan, session)
+    assert res.ok is False
+    assert any("original timeline intact" in e for e in res.errors)
+
+
+def _start_of(ir, name):
+    return next(c for c in ir.real_clips() if c.name == name).start
 
 
 def test_apply_rejects_invalid_plan_before_touching_anything():

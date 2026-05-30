@@ -20,7 +20,15 @@ from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
 from .base import ApplyResult, Capabilities, GrabAdapter, Selection
-from .resolve_client import ResolveOperationFailed, ResolveSession, connect, require
+from .interchange import REBUILD_OPS, OtioMutator
+from .resolve_client import (
+    ResolveOperationFailed,
+    ResolveSession,
+    connect,
+    export_timeline_otio,
+    import_timeline_from_file,
+    require,
+)
 
 # Ops the Resolve scripting API can apply in place, reliably. Everything else (precise
 # move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
@@ -191,8 +199,17 @@ class ResolveAdapter(GrabAdapter):
         if not result.ok:
             return ApplyResult(ok=False, errors=[str(e) for e in result.errors])
 
-        rebuild_needed = [op.op for op in plan.ops if op.op not in LIVE_OPS]
+        # Structural ops (trim/move/split/insert/ripple) can't be applied precisely by the live
+        # scripting API, so any plan containing one routes through the OTIO rebuild — which applies
+        # the WHOLE plan atomically (OtioMutator also handles marker/property/delete). Plans that
+        # are purely live ops keep the lossless fast-path.
+        structural = [op for op in plan.ops if op.op in REBUILD_OPS and op.op not in LIVE_OPS]
+        if structural:
+            return self._apply_via_rebuild(plan, session, ir, timeline)
+
         live_ops = [op for op in plan.ops if op.op in LIVE_OPS]
+        not_applicable = [op.op for op in plan.ops
+                          if op.op not in LIVE_OPS and op.op not in REBUILD_OPS]
 
         applied: list[str] = []
         rollback: list = []
@@ -213,13 +230,75 @@ class ResolveAdapter(GrabAdapter):
                     pass
             return ApplyResult(ok=False, errors=[f"aborted + rolled back: {exc}"], applied=applied)
 
-        if rebuild_needed:
+        if not_applicable:
             warnings.append(
-                f"{len(rebuild_needed)} op(s) need the OTIO-rebuild path (not live-applicable in "
-                f"Resolve): {sorted(set(rebuild_needed))}"
+                f"{len(not_applicable)} op(s) not applied — no live or rebuild path in Resolve: "
+                f"{sorted(set(not_applicable))} (e.g. add_transition is best done in the editor)"
             )
         diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no live ops)"
         return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+
+    # -- rebuild apply path -----------------------------------------------------
+    def _apply_via_rebuild(self, plan: EditPlan, session: ResolveSession,
+                           native_ir: TimelineIR, timeline: Any) -> ApplyResult:
+        """Apply structural ops by export→mutate→import (the dual apply-path's rebuild side).
+
+        Export the live timeline to OTIO, mutate the OTIO graph with the validated plan, and import
+        the result as a NEW timeline. Resolve imports rather than mutating in place, so a failure at
+        any step leaves the user's original timeline intact — no half-applied state to roll back.
+        """
+        import os
+        import tempfile
+
+        tmpdir = tempfile.mkdtemp(prefix="filmgrip-rebuild-")
+        export_path = os.path.join(tmpdir, "export.otio")
+        import_path = os.path.join(tmpdir, "rebuilt.otio")
+        try:
+            export_timeline_otio(session, export_path, timeline)
+        except ResolveOperationFailed as exc:
+            return ApplyResult(ok=False, errors=[f"rebuild export failed (timeline intact): {exc}"])
+
+        rebuild_ir = TimelineIR.from_otio_file(export_path)
+        remap_warnings = self._reresolve_plan(plan, native_ir, rebuild_ir)
+        vres = validate(plan, rebuild_ir)
+        if not vres.ok:
+            return ApplyResult(
+                ok=False,
+                errors=[f"rebuild re-validation failed (timeline intact): {e}" for e in vres.errors])
+
+        applied, warnings = OtioMutator(rebuild_ir).apply(plan)
+        rebuild_ir.to_otio_file(import_path)
+        try:
+            import_timeline_from_file(session, import_path)
+        except ResolveOperationFailed as exc:
+            return ApplyResult(ok=False, applied=applied,
+                               errors=[f"rebuild import failed (original timeline intact): {exc}"])
+
+        warnings = remap_warnings + warnings + [
+            "applied via OTIO rebuild — created a NEW timeline; color grades, Fusion comps and some "
+            "transitions are NOT carried over (lossy). Your original timeline is left intact."
+        ]
+        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no rebuild ops)"
+        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+
+    @staticmethod
+    def _reresolve_plan(plan: EditPlan, native_ir: TimelineIR,
+                        rebuild_ir: TimelineIR) -> list[str]:
+        """Rewrite each op's clip_id to the exported IR's ids (content-stable, but drift-tolerant).
+
+        IDs are content-derived, so the exported OTIO usually mints identical ids — but if Resolve's
+        export drifts a position, ``IdMap.reresolve`` matches by fingerprint so the plan still lands.
+        """
+        warnings: list[str] = []
+        for op in plan.ops:
+            cid = getattr(op, "clip_id", None)
+            if cid is None or rebuild_ir.clip(cid) is not None:
+                continue
+            match = native_ir.reresolve(cid, rebuild_ir)
+            if match is not None and match.id != cid:
+                warnings.append(f"re-resolved clip {cid} → {match.id} across the OTIO export")
+                op.clip_id = match.id
+        return warnings
 
     def _apply_one(self, op, ir: TimelineIR, timeline: Any):
         """Apply one live op against its native handle.

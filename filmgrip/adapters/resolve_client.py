@@ -181,6 +181,49 @@ def connect(resolve: Any = None) -> Optional[ResolveSession]:
     return ResolveSession(resolve=resolve)
 
 
+# --------------------------------------------------------------------------- timeline rebuild I/O
+# The live scripting API can't reposition clips precisely (no per-item SetStart/SetDuration that's
+# reliable), so structural edits route through an OTIO round-trip: export the current timeline,
+# mutate the OTIO graph, re-import as a NEW timeline. OTIO is the highest-fidelity interchange
+# Resolve exports (resolve.EXPORT_OTIO) and is loss-tolerant for the cut/trim/move/split/ripple ops.
+_EXPORT_OTIO_ATTR = "EXPORT_OTIO"
+
+
+def export_timeline_otio(session: "ResolveSession", path: str, timeline: Any = None) -> bool:
+    """Export the current (or given) timeline to ``path`` as OTIO via ``Timeline.Export``.
+
+    Raises :class:`ResolveOperationFailed` on Resolve's silent-falsy failure so a botched export
+    aborts the rebuild before anything replaces the user's timeline.
+    """
+    tl = timeline or session.current_timeline()
+    if not tl:
+        raise ResolveOperationFailed("no current timeline to export")
+    fn = getattr(tl, "Export", None)
+    if not callable(fn):
+        raise ResolveOperationFailed("Resolve Timeline has no callable 'Export'")
+    export_type = getattr(session.resolve, _EXPORT_OTIO_ATTR, _EXPORT_OTIO_ATTR)
+    export_subtype = getattr(session.resolve, "EXPORT_NONE", 0)  # ignored for OTIO, required arg
+    return bool(require(fn(path, export_type, export_subtype),
+                        f"Timeline.Export({path}) returned falsy"))
+
+
+def import_timeline_from_file(session: "ResolveSession", path: str,
+                              options: Optional[dict] = None) -> Any:
+    """Create a NEW timeline from ``path`` via ``MediaPool.ImportTimelineFromFile``; return it.
+
+    Resolve imports rather than mutating in place, so the user's original timeline is untouched
+    until they (or a later step) make the rebuilt one current — a built-in safety net.
+    """
+    mp = session.media_pool()
+    if not mp:
+        raise ResolveOperationFailed("no media pool (open a project first)")
+    fn = getattr(mp, "ImportTimelineFromFile", None)
+    if not callable(fn):
+        raise ResolveOperationFailed("MediaPool has no callable 'ImportTimelineFromFile'")
+    args = (path, options) if options else (path,)
+    return require(fn(*args), f"ImportTimelineFromFile({path}) returned falsy")
+
+
 def preflight() -> dict[str, Any]:
     """Diagnose the live Resolve scripting path without raising.
 

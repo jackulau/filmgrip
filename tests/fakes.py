@@ -223,11 +223,48 @@ class FakeTimeline:
             self._tracks[key] = [i for i in lst if i not in items]
         return True
 
+    def Export(self, path, export_type=None, export_subtype=None) -> bool:
+        """Serialize this fake timeline to OTIO, mirroring ResolveAdapter.snapshot's layout.
+
+        Producing OTIO whose clips match the snapshot (same names/positions/src basenames) is what
+        lets a plan's content-stable clip ids resolve against the exported IR in the rebuild path.
+        """
+        self.calls.append(("Export", path, export_type, export_subtype))
+        import opentimelineio as otio
+        rate = 24.0
+
+        def rt(f):
+            return otio.opentime.RationalTime(int(f), rate)
+
+        tl = otio.schema.Timeline(name=self._name)
+        tl.global_start_time = rt(0)
+        for kind, TrackKind in (("video", otio.schema.TrackKind.Video),
+                                ("audio", otio.schema.TrackKind.Audio)):
+            for (ttype, idx) in sorted(k for k in self._tracks if k[0] == kind):
+                tr = otio.schema.Track(name=self._track_names.get((ttype, idx), ""), kind=TrackKind)
+                cursor = 0
+                for it in sorted(self._tracks[(ttype, idx)], key=lambda i: i.GetStart()):
+                    start = it.GetStart() - self._start
+                    if start > cursor:
+                        tr.append(otio.schema.Gap(
+                            source_range=otio.opentime.TimeRange(rt(0), rt(start - cursor))))
+                    tr.append(otio.schema.Clip(
+                        name=it.GetName(),
+                        media_reference=otio.schema.ExternalReference(target_url=it._src_path),
+                        source_range=otio.opentime.TimeRange(
+                            rt(it.GetSourceStartFrame()), rt(it.GetDuration()))))
+                    cursor = start + it.GetDuration()
+                tl.tracks.append(tr)
+        otio.adapters.write_to_file(tl, path)
+        return True
+
 
 class FakeMediaPool:
     def __init__(self, selected: Optional[list[FakeMediaPoolItem]] = None):
         self._selected = list(selected or [])
         self.append_log: list[Any] = []
+        self.imported_timelines: list[str] = []
+        self.imported_media: list[Any] = []
 
     def GetSelectedClips(self) -> list[FakeMediaPoolItem]:
         return list(self._selected)
@@ -241,6 +278,21 @@ class FakeMediaPool:
         # Return one fake item per appended clip-info, mimicking the real return.
         flat = args[0] if len(args) == 1 and isinstance(args[0], list) else list(args)
         return [FakeTimelineItem(f"appended-{i}", 0, 1) for i, _ in enumerate(flat)]
+
+    def ImportMedia(self, items) -> list:
+        """Record imported file paths; return one media-pool item per path (truthy, like Resolve)."""
+        paths = items if isinstance(items, list) else [items]
+        out = []
+        for p in paths:
+            path = p.get("FilePath") if isinstance(p, dict) else p
+            self.imported_media.append(path)
+            out.append(FakeMediaPoolItem(str(path), {"File Path": str(path)}))
+        return out
+
+    def ImportTimelineFromFile(self, path, options=None):
+        """Record the rebuilt-timeline path and return a truthy handle (a loaded FakeTimeline)."""
+        self.imported_timelines.append(path)
+        return _fake_timeline_from_otio(path)
 
     def GetRootFolder(self):
         return None
@@ -305,8 +357,46 @@ class FakeResolve:
     def Fusion(self):
         return None
 
+    # Timeline-export type constants (the adapter reads resolve.EXPORT_OTIO off this handle).
+    EXPORT_OTIO = "EXPORT_OTIO"
+    EXPORT_NONE = 0
+
 
 # --------------------------------------------------------------------------- builders
+def _fake_timeline_from_otio(path: str) -> "FakeTimeline":
+    """Load an OTIO file into a FakeTimeline so an imported/rebuilt timeline is a usable handle."""
+    import opentimelineio as otio
+
+    timeline = otio.adapters.read_from_file(path)
+    tl = FakeTimeline(timeline.name or "Imported", start_frame=0)
+    v_idx = a_idx = 0
+    for track in timeline.tracks:
+        is_video = (track.kind or "Video").lower().startswith("v")
+        if is_video:
+            v_idx += 1
+            ttype, idx = "video", v_idx
+        else:
+            a_idx += 1
+            ttype, idx = "audio", a_idx
+        items = []
+        for child in track:
+            if isinstance(child, (otio.schema.Gap, otio.schema.Transition)):
+                continue
+            rng = child.range_in_parent()
+            src_start = 0
+            if getattr(child, "source_range", None) is not None:
+                src_start = int(round(child.source_range.start_time.to_frames()))
+            url = ""
+            mr = getattr(child, "media_reference", None)
+            if mr is not None:
+                url = getattr(mr, "target_url", "") or ""
+            items.append(FakeTimelineItem(
+                child.name or "clip",
+                int(round(rng.start_time.to_frames())),
+                int(round(rng.duration.to_frames())),
+                source_start=src_start, src_path=url))
+        tl.add_track(ttype, idx, items)
+    return tl
 def make_two_track_resolve() -> FakeResolve:
     """A small populated graph: V1 with 3 clips, A1 with 1 clip, one selected media item."""
     v1 = [
