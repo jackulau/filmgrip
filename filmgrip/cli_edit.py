@@ -20,7 +20,7 @@ from typing import Optional
 
 from .adapters.base import Selection
 from .core.ir import TimelineIR
-from .integration.mcp_host import PlannerContext, plan_edit
+from .integration.mcp_host import PlannerContext
 from .protocol.editplan import EditPlan
 from .protocol.validate import dry_run, validate
 
@@ -120,18 +120,15 @@ def _run_live(args) -> int:
                   "selected clip\"")
             return 1
         from .integration.mcp_host import ClaudeAgentTransport
+        from .integration.repair import plan_with_repair
 
         ctx = PlannerContext(ir=ir, selection=selection, source=session, adapter=adapter)
-        result = plan_edit(ctx, args.prompt, ClaudeAgentTransport())
-        if result.plan is None:
-            _emit("plan failed: " + "; ".join(result.errors))
-            return 1
-        if not result.ok:
-            _emit("plan invalid:\n  " + "\n  ".join(result.errors))
+        result = plan_with_repair(ctx, args.prompt, ClaudeAgentTransport())
+        _emit("# " + result.cost_line())
+        if result.plan is None or not result.ok:
+            _emit("plan failed:\n  " + "\n  ".join(result.errors or ["no plan produced"]))
             return 1
         plan = result.plan
-        if result.cost_usd:
-            _emit(f"# planned in 1 turn — ${result.cost_usd:.4f}")
 
     if args.dry_run:
         _emit(dry_run(plan, ir))
