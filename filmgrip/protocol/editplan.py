@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2 adds audio (import_audio) + organize (add_track/rename_track/create_bin/move_to_bin)
 
 # Properties an adapter is allowed to set. Anything outside this set is rejected at parse time —
 # Claude cannot invent a destructive or unsupported property key. Adapters map these to their
@@ -46,6 +46,14 @@ MARKER_COLORS: frozenset[str] = frozenset({
 
 TRANSITION_TYPES: frozenset[str] = frozenset({
     "cross_dissolve", "dip_to_color", "smooth_cut", "fade_in", "fade_out", "wipe",
+})
+
+# Audio attributes Resolve's scripting API does NOT expose on a timeline item (they live on the
+# Fairlight page and aren't scriptable). film-grip refuses to pretend it can set these — they are
+# surfaced as an honest limitation (in the planner prompt + adapter capabilities), never silently
+# dropped. A user asking to "lower the volume" is told it's a manual step, not given a false success.
+AUDIO_PROPS_UNSUPPORTED: frozenset[str] = frozenset({
+    "volume", "gain", "level", "fade_in", "fade_out", "pan", "mute", "solo",
 })
 
 
@@ -73,10 +81,13 @@ class Insert(_Op):
     """Insert a media reference as a new clip on a track at a timeline frame."""
     op: Literal["insert"] = "insert"
     src_ref: str = Field(description="media basename or media-pool id to place")
-    track: str = Field(description="target track code, e.g. 'v1'")
+    track: str = Field(description="target track code, e.g. 'v1' or 'a1'")
     at_start: int = Field(ge=0)
     source_in: int = Field(default=0, ge=0)
     duration: int = Field(gt=0)
+    media_type: Literal["auto", "video", "audio"] = Field(
+        default="auto",
+        description="'auto' infers from the track code (a* = audio); set explicitly to force")
 
 
 class Delete(_Op):
@@ -151,8 +162,73 @@ class Ripple(_Op):
     track: Optional[str] = Field(default=None, description="restrict to one track code, else all")
 
 
+class ImportAudio(_Op):
+    """Import a sound effect / audio file and place it on an audio track.
+
+    Reference the effect by ``sfx`` (a name in the user's SFX library) OR ``src_ref`` (an explicit
+    audio file path). The host resolves ``sfx`` → a real path via the SFX library, imports it into the
+    project's media pool, and lands it on ``track`` at ``at_start``.
+
+    Honest limitation: per-clip volume/gain/fades are NOT settable via Resolve scripting (Fairlight
+    only). This op *places* audio; level/fade tweaks stay a manual step — see ``AUDIO_PROPS_UNSUPPORTED``.
+    """
+    op: Literal["import_audio"] = "import_audio"
+    track: str = Field(description="target AUDIO track code, e.g. 'a1'")
+    at_start: int = Field(default=0, ge=0, description="timeline frame to place the audio")
+    sfx: str = Field(default="", description="name of an effect in the user's SFX library")
+    src_ref: str = Field(default="", description="explicit audio file path (alternative to 'sfx')")
+    source_in: int = Field(default=0, ge=0, description="frame offset into the audio source")
+    duration: Optional[int] = Field(default=None, gt=0,
+                                    description="frames to place; None = the file's full length")
+
+    @field_validator("track")
+    @classmethod
+    def _is_audio_track(cls, v: str) -> str:
+        if v[:1].lower() != "a":
+            raise ValueError(f"import_audio target must be an audio track (e.g. 'a1'), got '{v}'")
+        return v
+
+    @model_validator(mode="after")
+    def _has_a_source(self) -> "ImportAudio":
+        if not (self.sfx or self.src_ref):
+            raise ValueError("import_audio needs either 'sfx' (library name) or 'src_ref' (file path)")
+        return self
+
+
+class AddTrack(_Op):
+    """Add a new track to the timeline (organizing primitive)."""
+    op: Literal["add_track"] = "add_track"
+    kind: Literal["video", "audio", "subtitle"] = "video"
+    audio_type: str = Field(default="stereo",
+                            description="for audio tracks: mono/stereo/5.1/7.1 etc (Resolve subTrackType)")
+
+
+class RenameTrack(_Op):
+    """Rename an existing track (organizing primitive)."""
+    op: Literal["rename_track"] = "rename_track"
+    track: str = Field(description="track code to rename, e.g. 'v2' or 'a1'")
+    name: str = Field(min_length=1, max_length=120)
+
+
+class CreateBin(_Op):
+    """Create a media-pool bin/folder (organizing primitive)."""
+    op: Literal["create_bin"] = "create_bin"
+    name: str = Field(min_length=1, max_length=120)
+    parent: str = Field(default="", description="parent bin name; empty = the media-pool root")
+
+
+class MoveToBin(_Op):
+    """Move a clip's source media into a media-pool bin (organizing primitive)."""
+    op: Literal["move_to_bin"] = "move_to_bin"
+    clip_id: str
+    bin: str = Field(min_length=1, max_length=120, description="destination bin name")
+
+
 AnyOp = Annotated[
-    Union[Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple],
+    Union[
+        Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
+        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin,
+    ],
     Field(discriminator="op"),
 ]
 

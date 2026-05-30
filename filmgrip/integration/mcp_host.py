@@ -73,8 +73,10 @@ def payload_query_clips(ctx: PlannerContext, *, name: Optional[str] = None,
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
-    ops = ("trim, move, insert, delete, set_property, add_marker, add_transition, split, ripple")
+    ops = ("trim, move, insert, delete, set_property, add_marker, add_transition, split, ripple, "
+           "import_audio, add_track, rename_track, create_bin, move_to_bin")
     props = ", ".join(sorted(ep.ALLOWED_PROPERTIES))
+    no_audio = ", ".join(sorted(ep.AUDIO_PROPS_UNSUPPORTED))
     return (
         "You are film-grip's video-editing planner. The user selected clips in their editor and "
         "gave a natural-language instruction. Produce an EditPlan: a list of typed ops over STABLE "
@@ -86,6 +88,13 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "Call get_selection first, then get_context(ids) to see the neighborhood; use query_clips "
         "to find clips by name. Only reference clip ids you have seen. Never invent ids or frames.\n"
         f"Ops: {ops}. set_property keys are limited to: {props}.\n"
+        "Audio/SFX: use import_audio with sfx=<name from the SFX library you are given> (or "
+        "src_ref=<path>) to place a sound effect on an audio track (e.g. 'a1'); add an audio track "
+        f"first with add_track if none fits. You CANNOT set audio {no_audio} — those are not "
+        "scriptable; never emit them, and if asked, place the audio and note the level is a manual "
+        "step.\n"
+        "Organizing: add_track / rename_track / create_bin / move_to_bin tidy tracks and media-pool "
+        "bins.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 

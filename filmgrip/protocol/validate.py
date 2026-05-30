@@ -26,6 +26,8 @@ ILLEGAL_OVERLAP = "ILLEGAL_OVERLAP"
 TRANSITION_NOT_ADJACENT = "TRANSITION_NOT_ADJACENT"
 SPLIT_OUT_OF_CLIP = "SPLIT_OUT_OF_CLIP"
 NOT_A_CLIP = "NOT_A_CLIP"
+NOT_AUDIO_TRACK = "NOT_AUDIO_TRACK"
+NO_AUDIO_SOURCE = "NO_AUDIO_SOURCE"
 
 _TRANSITIONS_NEED_NEIGHBOR = {"cross_dissolve", "dip_to_color", "smooth_cut", "wipe"}
 
@@ -105,7 +107,8 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
     for i, op in enumerate(plan.ops):
         name = op.op
         # ops that target an existing clip
-        if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition", "split"):
+        if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
+                    "split", "move_to_bin"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -188,6 +191,32 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                         f"ripple would move '{c.name}' to {c.start + op.delta} (< 0)", c.id)
                     break
 
+        elif name == "import_audio":
+            if not (op.sfx or op.src_ref):
+                err(NO_AUDIO_SOURCE, i, name, "import_audio needs 'sfx' or 'src_ref'", None)
+            elif not _track_exists(ir, op.track):
+                err(TRACK_NOT_FOUND, i, name, f"audio track '{op.track}' does not exist "
+                    f"(add it with add_track first)", None)
+            else:
+                kind, _ = parse_track_code(op.track)
+                if kind != "audio":
+                    err(NOT_AUDIO_TRACK, i, name, f"'{op.track}' is not an audio track", None)
+                elif op.duration is not None:
+                    hit = _overlaps(op.at_start, op.duration, _clips_on_code(ir, op.track))
+                    if hit is not None:
+                        err(ILLEGAL_OVERLAP, i, name,
+                            f"audio at {op.at_start} overlaps '{hit.name}' ({hit.start}..{hit.end})",
+                            None)
+                # duration None -> exact length unknown until the file is resolved; the adapter
+                # clamps/places at apply time (a warning, not a hard pre-check).
+
+        elif name == "rename_track":
+            if not _track_exists(ir, op.track):
+                err(TRACK_NOT_FOUND, i, name, f"track '{op.track}' does not exist", None)
+
+        # add_track / create_bin / move_to_bin: shape is guaranteed at parse time; their live
+        # preconditions (media-pool state) are checked by the adapter at apply (D7).
+
     return res
 
 
@@ -247,4 +276,18 @@ def _describe(op, ir: TimelineIR) -> str:
     if op.op == "ripple":
         scope = op.track or "all tracks"
         return f"ripple {scope} from {op.from_frame} by {op.delta:+d}"
+    if op.op == "import_audio":
+        src = op.sfx and f"sfx:{op.sfx}" or op.src_ref
+        dur = f" (dur {op.duration})" if op.duration else ""
+        return f"import_audio {src} on {op.track} @ {op.at_start}{dur}"
+    if op.op == "add_track":
+        extra = f" ({op.audio_type})" if op.kind == "audio" else ""
+        return f"add_track {op.kind}{extra}"
+    if op.op == "rename_track":
+        return f"rename_track {op.track} → {op.name!r}"
+    if op.op == "create_bin":
+        loc = f" under {op.parent!r}" if op.parent else ""
+        return f"create_bin {op.name!r}{loc}"
+    if op.op == "move_to_bin":
+        return f"move_to_bin {nm(op.clip_id)} → {op.bin!r}"
     return op.op
