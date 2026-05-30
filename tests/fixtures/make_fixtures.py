@@ -133,6 +133,35 @@ def write_sample_edl() -> str:
     return out
 
 
+_MLT_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
+<mlt version="7.22.0" title="{title}">
+  <profile frame_rate_num="24" frame_rate_den="1" width="1920" height="1080"/>
+  <producer id="p0" in="0" out="47"><property name="mlt_service">avformat</property><property name="resource">/media/alpha.mp4</property></producer>
+  <producer id="p1" in="0" out="71"><property name="mlt_service">avformat</property><property name="resource">/media/bravo.mp4</property></producer>
+  <producer id="p2" in="0" out="35"><property name="mlt_service">avformat</property><property name="resource">/media/charlie.mp4</property></producer>
+  <playlist id="playlist0">
+    <entry producer="p0" in="0" out="47"/>
+    <entry producer="p1" in="0" out="71"/>
+    <entry producer="p2" in="0" out="35"/>
+  </playlist>
+  <tractor id="tractor0">
+    <track producer="playlist0"/>
+  </tractor>
+</mlt>
+"""
+
+
+def write_sample_mlt() -> list[str]:
+    """Shotcut (.mlt) and Kdenlive (.kdenlive) share the MLT XML schema; emit both."""
+    paths = []
+    for ext, title in ((".mlt", "fg-sample-shotcut"), (".kdenlive", "fg-sample-kdenlive")):
+        out = os.path.join(HERE, f"sample{ext}")
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(_MLT_TEMPLATE.format(title=title))
+        paths.append(out)
+    return paths
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -148,6 +177,8 @@ def main() -> None:
             print(f"wrote {fn()}")
         except Exception as exc:  # interchange adapters may be absent on a minimal install
             print(f"skipped {fn.__name__}: {exc}")
+    for p in write_sample_mlt():
+        print(f"wrote {p}")
 
 
 if __name__ == "__main__":
