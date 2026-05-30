@@ -100,7 +100,16 @@ class ResolveAdapter(GrabAdapter):
             live_selection=False,  # honest: no true multi-clip timeline selection API
             write_back=True,
             requires_app_running=True,
-            lossy_features=["add_transition (Fusion/interchange only)"],
+            lossy_features=[
+                "add_transition (Fusion/interchange only)",
+                "structural edits via OTIO rebuild are lossy (drop grades/Fusion/some transitions)",
+                "audio volume/gain/fades are NOT scriptable (Fairlight-only) — placement only",
+            ],
+            audio_support="live",                 # ImportMedia + AppendToTimeline(mediaType=2)
+            audio_volume_scriptable=False,        # honest: Fairlight levels aren't scriptable
+            organize_support="live",              # add_track/rename_track/create_bin/move_to_bin
+            editor_panel="native",                # Scripts-menu UIManager floating panel (D10)
+            selection_confidence="reconstructed",  # current item + media-pool, not a true multi-select
         )
 
     # -- read -------------------------------------------------------------------
@@ -191,7 +200,8 @@ class ResolveAdapter(GrabAdapter):
 
         note = ("Resolve exposes no true multi-clip timeline selection; reconstructed from "
                 "GetCurrentVideoItem + media-pool selection.")
-        return Selection(ids=ids, basis="current_video_item+media_pool", note=note)
+        return Selection(ids=ids, basis="current_video_item+media_pool", note=note,
+                         confidence="reconstructed")
 
     # -- write ------------------------------------------------------------------
     def apply(self, plan: EditPlan, source: Any, **kw) -> ApplyResult:

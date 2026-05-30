@@ -39,6 +39,10 @@ class CapcutAdapter(GrabAdapter):
             write_back=True,                # offline only, app must be closed
             requires_app_running=False,
             lossy_features=["effects/filters/text", "encrypted JianYing v6+ drafts (refused)"],
+            audio_support="offline",         # audio segments rewritten in the offline draft JSON
+            organize_support="none",
+            editor_panel="none",
+            selection_confidence="precise",  # the draft JSON IS the exact project
         )
 
     # -- locate + load ----------------------------------------------------------

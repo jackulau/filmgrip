@@ -270,7 +270,8 @@ class InterchangeAdapter(GrabAdapter):
         return Selection(
             ids=[c.id for c in ir.real_clips()],
             basis="interchange_export",
-            note="interchange has no live selection; the whole exported timeline is the context.")
+            note="interchange has no live selection; the whole exported timeline is the context.",
+            confidence="precise")  # the exported file IS the exact timeline — no reconstruction
 
     def apply(self, plan: EditPlan, source: Any, *, out_path: Optional[str] = None,
               out_format: Optional[str] = None, **kw) -> ApplyResult:

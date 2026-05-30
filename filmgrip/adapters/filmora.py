@@ -33,6 +33,10 @@ class FilmoraAdapter(GrabAdapter):
             write_back=False,           # the whole point — Filmora cannot be automated
             requires_app_running=False,
             lossy_features=["EVERYTHING on write — no write-back path exists"],
+            audio_support="read-only",       # audio is parsed, never written
+            organize_support="none",
+            editor_panel="read-only",
+            selection_confidence="readonly",
         )
 
     # -- read -------------------------------------------------------------------

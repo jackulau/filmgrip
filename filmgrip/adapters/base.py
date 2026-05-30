@@ -28,6 +28,12 @@ class Capabilities:
     write_back: bool
     requires_app_running: bool
     lossy_features: list[str] = field(default_factory=list)
+    # --- v2 honesty fields (audio / organize / in-app panel / selection confidence) ---
+    audio_support: str = "interchange"      # live | interchange | offline | read-only | none
+    audio_volume_scriptable: bool = False   # per-clip volume/gain/fades settable? (Resolve: NO)
+    organize_support: str = "none"          # live | interchange-warn | none
+    editor_panel: str = "none"              # native | uxp-future | read-only | none
+    selection_confidence: str = "precise"   # precise | reconstructed | readonly
 
     def as_dict(self) -> dict:
         return {
@@ -38,6 +44,11 @@ class Capabilities:
             "write_back": self.write_back,
             "requires_app_running": self.requires_app_running,
             "lossy_features": list(self.lossy_features),
+            "audio_support": self.audio_support,
+            "audio_volume_scriptable": self.audio_volume_scriptable,
+            "organize_support": self.organize_support,
+            "editor_panel": self.editor_panel,
+            "selection_confidence": self.selection_confidence,
         }
 
 
@@ -47,12 +58,14 @@ class Selection:
     ids: list[str]
     basis: str                      # "current_video_item+media_pool" | "interchange_export" | ...
     note: str = ""
+    confidence: str = "precise"     # precise | reconstructed | readonly — how sure the basis is
 
     def as_header(self, ir: TimelineIR) -> dict:
         from ..serialize.fgx import selection_header
 
         hdr = selection_header(ir, self.ids)
         hdr["basis"] = self.basis
+        hdr["confidence"] = self.confidence
         if self.note:
             hdr["note"] = self.note
         return hdr

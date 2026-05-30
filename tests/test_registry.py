@@ -45,8 +45,39 @@ def test_markdown_table_lists_all_editors_and_roles():
         assert editor in md
     assert "flagship-native" in md
     assert "read-only" in md
-    # Filmora's write-back shows the emphatic NO
-    assert "| Wondershare Filmora | read-only | no | NO |" in md
+    # honesty columns are present
+    assert "Audio" in md and "In-app panel" in md and "Selection" in md
+    # Filmora's write-back shows the emphatic NO (now the 3rd column)
+    assert "| Wondershare Filmora | read-only | NO |" in md
+
+
+def test_resolve_declares_honest_audio_organize_panel_fields():
+    c = R.get("resolve").capability
+    assert c.audio_support == "live"
+    assert c.audio_volume_scriptable is False        # honest: Fairlight levels aren't scriptable
+    assert c.organize_support == "live"
+    assert c.editor_panel == "native"
+    assert c.selection_confidence == "reconstructed"  # no true multi-select
+
+
+def test_every_entry_sets_the_v2_honesty_fields():
+    for slug in R.editors():
+        c = R.get(slug).capability
+        assert c.audio_support in {"live", "interchange", "offline", "read-only", "none"}
+        assert c.organize_support in {"live", "interchange-warn", "none"}
+        assert c.editor_panel in {"native", "uxp-future", "read-only", "none"}
+        assert c.selection_confidence in {"precise", "reconstructed", "readonly"}
+
+
+def test_filmora_panel_is_read_only_and_no_editor_volume_scriptable():
+    assert R.get("filmora").capability.editor_panel == "read-only"
+    # No editor exposes scriptable per-clip volume (Resolve = Fairlight-only; others = file-based).
+    assert all(not R.get(s).capability.audio_volume_scriptable for s in R.editors())
+
+
+def test_op_support_table_covers_audio_and_transition():
+    md = R.op_support_markdown()
+    assert "import_audio" in md and "add_transition" in md and "move" in md
 
 
 def test_extension_routing():

@@ -27,9 +27,14 @@ class EditorEntry:
     extensions: tuple[str, ...] = ()
 
 
-def _cap(editor, role, mechanism, *, live, write, app, lossy) -> Capabilities:
+def _cap(editor, role, mechanism, *, live, write, app, lossy,
+         audio="interchange", organize="interchange-warn", panel="none",
+         confidence="precise", volume_scriptable=False) -> Capabilities:
     return Capabilities(editor=editor, role=role, mechanism=mechanism, live_selection=live,
-                        write_back=write, requires_app_running=app, lossy_features=list(lossy))
+                        write_back=write, requires_app_running=app, lossy_features=list(lossy),
+                        audio_support=audio, audio_volume_scriptable=volume_scriptable,
+                        organize_support=organize, editor_panel=panel,
+                        selection_confidence=confidence)
 
 
 def _build_registry() -> dict[str, EditorEntry]:
@@ -45,7 +50,8 @@ def _build_registry() -> dict[str, EditorEntry]:
         EditorEntry(
             "premiere", interchange,
             _cap("Premiere Pro", "interchange", "FCP7 XML / AAF round-trip (UXP panel = future path)",
-                 live=False, write=True, app=False, lossy=["transitions", "effects", "speed"]),
+                 live=False, write=True, app=False, lossy=["transitions", "effects", "speed"],
+                 panel="uxp-future"),
             (".xml", ".aaf")),
         EditorEntry(
             "avid", interchange,
@@ -96,15 +102,38 @@ def for_extension(ext: str) -> EditorEntry | None:
 
 def capability_markdown() -> str:
     """Render the honest capability table (also written to docs by ``write_capabilities_doc``)."""
-    head = ("| Editor | Role | Live selection | Write-back | Needs app | Mechanism |\n"
-            "|---|---|---|---|---|---|")
+    head = ("| Editor | Role | Write-back | Audio | Organize | In-app panel | Selection | Mechanism |\n"
+            "|---|---|---|---|---|---|---|---|")
     rows = []
     for e in REGISTRY.values():
         c = e.capability
         rows.append(
-            f"| {c.editor} | {c.role} | {'yes' if c.live_selection else 'no'} | "
-            f"{'yes' if c.write_back else 'NO'} | {'yes' if c.requires_app_running else 'no'} | "
-            f"{c.mechanism} |")
+            f"| {c.editor} | {c.role} | {'yes' if c.write_back else 'NO'} | "
+            f"{c.audio_support} | {c.organize_support} | {c.editor_panel} | "
+            f"{c.selection_confidence} | {c.mechanism} |")
+    return "\n".join([head, *rows])
+
+
+def op_support_markdown() -> str:
+    """Per-op support so users know which edits actually land where (live vs rebuild vs interchange)."""
+    from .resolve_adapter import LIVE_EXTRA_OPS, LIVE_OPS
+
+    head = ("| Op | Resolve (live) | Resolve (rebuild) | Interchange file |\n"
+            "|---|---|---|---|")
+    notes = {
+        "trim": ("rebuild", "yes", "yes"), "move": ("rebuild", "yes", "yes"),
+        "split": ("rebuild", "yes", "yes"), "insert": ("rebuild", "yes", "yes"),
+        "ripple": ("rebuild", "yes", "yes"), "delete": ("yes", "yes", "yes"),
+        "add_marker": ("yes", "yes", "yes"), "set_property": ("yes", "yes", "yes (metadata)"),
+        "add_transition": ("no", "no", "no (do in editor)"),
+        "import_audio": ("yes", "n/a", "no"), "add_track": ("yes", "n/a", "no"),
+        "rename_track": ("yes", "n/a", "no"), "create_bin": ("yes", "n/a", "no"),
+        "move_to_bin": ("yes", "n/a", "no"),
+    }
+    rows = []
+    for op, (live, rebuild, inter) in notes.items():
+        rows.append(f"| {op} | {live} | {rebuild} | {inter} |")
+    _ = (LIVE_OPS, LIVE_EXTRA_OPS)  # keep the table honest against the live sets
     return "\n".join([head, *rows])
 
 
@@ -115,7 +144,11 @@ def write_capabilities_doc(path: str = "docs/CAPABILITIES.md") -> str:
     body = ("# film-grip — editor capability matrix\n\n"
             "Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it never "
             "promises an editor automation it cannot deliver.\n\n"
-            + capability_markdown() + "\n")
+            "**Audio**: live = import+place on an audio track via scripting; interchange/offline = via "
+            "file round-trip; read-only = parsed, not written. **Per-clip volume/gain/fades are NOT "
+            "scriptable in Resolve** (Fairlight-only) — film-grip places audio, levels stay manual.\n\n"
+            + capability_markdown() + "\n\n"
+            "## Which ops land where\n\n" + op_support_markdown() + "\n")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(body)
     return path
