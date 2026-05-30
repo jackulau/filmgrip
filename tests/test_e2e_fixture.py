@@ -37,6 +37,60 @@ def test_edit_fixture_without_plan_explains_itself(capsys):
     assert "needs --plan" in out
 
 
+def _otio_three(tmp_path):
+    """A1-clip-per-48f V1 timeline A|B|C — clean ground for cut/split assertions."""
+    import opentimelineio as otio
+    rate = 24.0
+
+    def rt(f):
+        return otio.opentime.RationalTime(f, rate)
+
+    tl = otio.schema.Timeline(name="cutdemo")
+    tl.global_start_time = rt(0)
+    v = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+    for nm in ("A", "B", "C"):
+        v.append(otio.schema.Clip(
+            name=nm, media_reference=otio.schema.ExternalReference(target_url=f"/m/{nm}.mov"),
+            source_range=otio.opentime.TimeRange(rt(0), rt(48))))
+    tl.tracks.append(v)
+    p = str(tmp_path / "cutdemo.otio")
+    otio.adapters.write_to_file(tl, p)
+    return p
+
+
+def _clip_id(src, name):
+    from filmgrip.core.ir import TimelineIR
+    return next(c for c in TimelineIR.from_otio_file(src).real_clips() if c.name == name).id
+
+
+def test_ripple_delete_cut_closes_gap_via_cli(tmp_path):
+    from filmgrip.core.ir import TimelineIR
+    src = _otio_three(tmp_path)  # A 0..48, B 48..96, C 96..144
+    plan = tmp_path / "cut.json"
+    plan.write_text(json.dumps({"notes": "cut B out",
+                                "ops": [{"op": "delete", "clip_id": _clip_id(src, "B"), "ripple": True}]}))
+    out = str(tmp_path / "cut.edited.otio")
+    code = main(["edit", "--fixture", src, "--plan", str(plan), "--out", out])
+    assert code == 0
+    ir2 = TimelineIR.from_otio_file(out)
+    assert [c.name for c in ir2.real_clips()] == ["A", "C"]
+    assert next(c for c in ir2.real_clips() if c.name == "C").start == 48  # gap closed by ripple
+
+
+def test_split_razor_cut_via_cli(tmp_path):
+    from filmgrip.core.ir import TimelineIR
+    src = _otio_three(tmp_path)
+    plan = tmp_path / "split.json"
+    # B is 48..96 — razor at 72 yields two 24f halves.
+    plan.write_text(json.dumps({"ops": [{"op": "split", "clip_id": _clip_id(src, "B"), "at_frame": 72}]}))
+    out = str(tmp_path / "split.edited.otio")
+    code = main(["edit", "--fixture", src, "--plan", str(plan), "--out", out])
+    assert code == 0
+    ir2 = TimelineIR.from_otio_file(out)
+    halves = [c for c in ir2.real_clips() if c.name == "B"]
+    assert len(halves) == 2 and {c.duration for c in halves} == {24}
+
+
 def test_version_exits_zero():
     import pytest
 

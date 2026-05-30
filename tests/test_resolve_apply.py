@@ -163,6 +163,20 @@ def _start_of(ir, name):
     return next(c for c in ir.real_clips() if c.name == name).start
 
 
+def test_ripple_delete_is_live_and_closes_the_gap_natively():
+    # A ripple-delete (lift + close the gap) is the core "cut this out" primitive. delete is a live
+    # op, so it stays on the fast-path and hands ripple=True to Resolve's DeleteClips, which closes
+    # the gap natively — no lossy rebuild needed for a straight cut.
+    resolve, a, b, tl = _build()
+    adapter = ResolveAdapter()
+    session = _session(resolve)
+    ir = adapter.snapshot(session)
+    plan = EditPlan.parse({"ops": [{"op": "delete", "clip_id": _id(ir, "midshot"), "ripple": True}]})
+    res = adapter.apply(plan, session)
+    assert res.ok, res.errors
+    assert ("DeleteClips", ["midshot"], True) in tl.calls
+
+
 def test_apply_rejects_invalid_plan_before_touching_anything():
     resolve, a, b, tl = _build()
     adapter = ResolveAdapter()
