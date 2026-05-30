@@ -20,6 +20,7 @@ import opentimelineio as otio
 from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
+from ..serialize.fgx import parse_track_code
 from .base import ApplyResult, Capabilities, GrabAdapter, Selection
 
 # extension -> OTIO adapter name
@@ -30,10 +31,14 @@ FORMAT_BY_EXT = {
     ".otio": "otio_json", ".otioz": "otioz",
 }
 
-# Ops that survive an OTIO interchange round-trip cleanly. The rest are surfaced as warnings
-# (move/insert/ripple need absolute repositioning the sequential model handles poorly here;
-# add_transition fidelity is format-dependent — better done in the live editor).
-REBUILD_OPS = frozenset({"trim", "delete", "split", "add_marker", "set_property"})
+# Ops the OTIO-rebuild path applies on the timeline graph. This is the universal write path —
+# it's also what the live Resolve adapter falls back to (export EXPORT_OTIO -> mutate -> import),
+# where structural repositioning (move/insert/ripple) MUST take effect, not just warn. The OTIO
+# model expresses absolute position as ordered items + gaps, so move/insert/ripple are exact here.
+# Only add_transition stays out — transition fidelity is format-dependent and best done live.
+REBUILD_OPS = frozenset({
+    "trim", "delete", "split", "add_marker", "set_property", "move", "insert", "ripple",
+})
 
 _MARKER_COLOR = {
     "red": otio.schema.MarkerColor.RED, "green": otio.schema.MarkerColor.GREEN,
@@ -76,6 +81,110 @@ class OtioMutator:
     def _clip_and_item(self, op):
         clip = self.ir.clip(op.clip_id)
         return clip, clip.otio
+
+    # -- placement helpers (shared by move/insert/ripple) -----------------------
+    def _gap(self, dur: int) -> otio.schema.Gap:
+        return otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(_rt(0, self.rate), _rt(dur, self.rate)))
+
+    @staticmethod
+    def _positions(track) -> list[tuple]:
+        """``(child, start_frame, duration_frame)`` per item; transitions carry ``None`` (no time)."""
+        out: list[tuple] = []
+        for ch in track:
+            if isinstance(ch, otio.schema.Transition):
+                out.append((ch, None, None))
+                continue
+            rng = ch.range_in_parent()
+            out.append((ch, int(round(rng.start_time.to_frames())),
+                        int(round(rng.duration.to_frames()))))
+        return out
+
+    def _otio_track(self, code: str):
+        """Resolve a track code ('v1'/'a2') to its OTIO track in timeline order."""
+        kind, idx = parse_track_code(code)
+        n = 0
+        for tr in self.ir.timeline.tracks:
+            is_video = (tr.kind or "Video").lower().startswith("v")
+            if (kind == "video") == is_video:
+                n += 1
+                if n == idx:
+                    return tr
+        raise ValueError(f"track '{code}' not found")
+
+    def _place_at(self, track, item, at_frame: int, item_dur: int) -> None:
+        """Place ``item`` so it starts at ``at_frame`` — splitting a free gap or padding past end.
+
+        The validator guarantees the destination span doesn't overlap a clip, so the target region
+        is covered by a single gap or lies at/after the track end. Anything else is a real
+        inconsistency and is raised rather than written wrong.
+        """
+        positions = self._positions(track)
+        track_end = max((s + d for _, s, d in positions if s is not None), default=0)
+        for i, (ch, start, dur) in enumerate(positions):
+            if start is None:
+                continue
+            if isinstance(ch, otio.schema.Gap) and start <= at_frame \
+                    and at_frame + item_dur <= start + dur:
+                left = at_frame - start
+                right = (start + dur) - (at_frame + item_dur)
+                pieces = ([self._gap(left)] if left > 0 else []) + [item] \
+                    + ([self._gap(right)] if right > 0 else [])
+                del track[i]
+                for off, piece in enumerate(pieces):
+                    track.insert(i + off, piece)
+                return
+        if at_frame >= track_end:
+            if at_frame > track_end:
+                track.append(self._gap(at_frame - track_end))
+            track.append(item)
+            return
+        raise ValueError(
+            f"cannot place item at frame {at_frame}: no single free gap of {item_dur} frames")
+
+    def _move(self, op) -> str:
+        clip, item = self._clip_and_item(op)
+        item_dur = clip.duration
+        src_track = item.parent()
+        sidx = list(src_track).index(item)
+        del src_track[sidx]
+        src_track.insert(sidx, self._gap(item_dur))  # leave a gap so source neighbours hold position
+        code = op.to_track or f"{clip.track_kind[0]}{clip.track_index}"
+        self._place_at(self._otio_track(code), item, op.to_start, item_dur)
+        return f"move {clip.name} -> {op.to_start}{(' ' + op.to_track) if op.to_track else ''}"
+
+    def _insert(self, op) -> str:
+        new = otio.schema.Clip(
+            name=op.src_ref,
+            media_reference=otio.schema.ExternalReference(target_url=op.src_ref),
+            source_range=otio.opentime.TimeRange(
+                _rt(op.source_in, self.rate), _rt(op.duration, self.rate)))
+        self._place_at(self._otio_track(op.track), new, op.at_start, op.duration)
+        return f"insert {op.src_ref} on {op.track} @ {op.at_start} (dur {op.duration})"
+
+    def _ripple(self, op) -> str:
+        targets = [self._otio_track(op.track)] if op.track else list(self.ir.timeline.tracks)
+        for tr in targets:
+            positions = self._positions(tr)
+            first = next((i for i, (ch, s, d) in enumerate(positions)
+                          if s is not None and s >= op.from_frame), None)
+            if first is None:
+                continue
+            if op.delta > 0:
+                tr.insert(first, self._gap(op.delta))
+            elif op.delta < 0:
+                j = first - 1
+                gdur = positions[j][2] if j >= 0 else 0
+                if j >= 0 and isinstance(positions[j][0], otio.schema.Gap) and gdur >= -op.delta:
+                    if gdur == -op.delta:
+                        del tr[j]
+                    else:
+                        tr[j] = self._gap(gdur + op.delta)  # delta < 0 -> shrink the gap
+                else:
+                    raise ValueError(
+                        f"ripple {op.delta:+d} needs {-op.delta} frames of gap before frame "
+                        f"{op.from_frame}; none available")
+        return f"ripple {op.track or 'all'} from {op.from_frame} by {op.delta:+d}"
 
     def _trim(self, op) -> str:
         clip, item = self._clip_and_item(op)
