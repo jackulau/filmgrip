@@ -1,0 +1,420 @@
+{
+  "$defs": {
+    "AddMarker": {
+      "additionalProperties": false,
+      "description": "Add a marker. ``frame`` is an offset within the clip (0 = clip start).",
+      "properties": {
+        "op": {
+          "const": "add_marker",
+          "default": "add_marker",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "frame": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Frame",
+          "type": "integer"
+        },
+        "color": {
+          "default": "Blue",
+          "title": "Color",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "duration": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Duration",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "AddMarker",
+      "type": "object"
+    },
+    "AddTransition": {
+      "additionalProperties": false,
+      "description": "Add a transition on a clip edge (e.g. a cross dissolve at the 'in' edge).",
+      "properties": {
+        "op": {
+          "const": "add_transition",
+          "default": "add_transition",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "edge": {
+          "default": "out",
+          "enum": [
+            "in",
+            "out"
+          ],
+          "title": "Edge",
+          "type": "string"
+        },
+        "type": {
+          "default": "cross_dissolve",
+          "title": "Type",
+          "type": "string"
+        },
+        "duration": {
+          "default": 12,
+          "exclusiveMinimum": 0,
+          "title": "Duration",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "AddTransition",
+      "type": "object"
+    },
+    "Delete": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "delete",
+          "default": "delete",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "ripple": {
+          "default": false,
+          "description": "close the gap left behind",
+          "title": "Ripple",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "Delete",
+      "type": "object"
+    },
+    "Insert": {
+      "additionalProperties": false,
+      "description": "Insert a media reference as a new clip on a track at a timeline frame.",
+      "properties": {
+        "op": {
+          "const": "insert",
+          "default": "insert",
+          "title": "Op",
+          "type": "string"
+        },
+        "src_ref": {
+          "description": "media basename or media-pool id to place",
+          "title": "Src Ref",
+          "type": "string"
+        },
+        "track": {
+          "description": "target track code, e.g. 'v1'",
+          "title": "Track",
+          "type": "string"
+        },
+        "at_start": {
+          "minimum": 0,
+          "title": "At Start",
+          "type": "integer"
+        },
+        "source_in": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source In",
+          "type": "integer"
+        },
+        "duration": {
+          "exclusiveMinimum": 0,
+          "title": "Duration",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "src_ref",
+        "track",
+        "at_start",
+        "duration"
+      ],
+      "title": "Insert",
+      "type": "object"
+    },
+    "Move": {
+      "additionalProperties": false,
+      "description": "Move a clip to a new timeline start frame, optionally to another track.",
+      "properties": {
+        "op": {
+          "const": "move",
+          "default": "move",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "to_start": {
+          "description": "new timeline start frame",
+          "minimum": 0,
+          "title": "To Start",
+          "type": "integer"
+        },
+        "to_track": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 'v2'; None keeps current track",
+          "title": "To Track"
+        }
+      },
+      "required": [
+        "clip_id",
+        "to_start"
+      ],
+      "title": "Move",
+      "type": "object"
+    },
+    "Ripple": {
+      "additionalProperties": false,
+      "description": "Shift every clip at/after ``from_frame`` on a track by ``delta`` frames.",
+      "properties": {
+        "op": {
+          "const": "ripple",
+          "default": "ripple",
+          "title": "Op",
+          "type": "string"
+        },
+        "from_frame": {
+          "minimum": 0,
+          "title": "From Frame",
+          "type": "integer"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "integer"
+        },
+        "track": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "restrict to one track code, else all",
+          "title": "Track"
+        }
+      },
+      "required": [
+        "from_frame",
+        "delta"
+      ],
+      "title": "Ripple",
+      "type": "object"
+    },
+    "SetProperty": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "set_property",
+          "default": "set_property",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "clip_id",
+        "key",
+        "value"
+      ],
+      "title": "SetProperty",
+      "type": "object"
+    },
+    "Split": {
+      "additionalProperties": false,
+      "description": "Split a clip into two at a timeline frame inside it.",
+      "properties": {
+        "op": {
+          "const": "split",
+          "default": "split",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "at_frame": {
+          "description": "absolute timeline frame, must fall inside the clip",
+          "minimum": 0,
+          "title": "At Frame",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id",
+        "at_frame"
+      ],
+      "title": "Split",
+      "type": "object"
+    },
+    "Trim": {
+      "additionalProperties": false,
+      "description": "Adjust a clip's in- or out-point by ``delta`` frames (negative = shorten/move earlier).",
+      "properties": {
+        "op": {
+          "const": "trim",
+          "default": "trim",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "edge": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "title": "Edge",
+          "type": "string"
+        },
+        "delta": {
+          "description": "frames to move the edge; +out lengthens, +in shortens head",
+          "title": "Delta",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id",
+        "edge",
+        "delta"
+      ],
+      "title": "Trim",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "An ordered list of typed ops plus an optional one-line rationale.",
+  "properties": {
+    "version": {
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "notes": {
+      "default": "",
+      "description": "one-line rationale (optional)",
+      "maxLength": 400,
+      "title": "Notes",
+      "type": "string"
+    },
+    "ops": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "add_marker": "#/$defs/AddMarker",
+            "add_transition": "#/$defs/AddTransition",
+            "delete": "#/$defs/Delete",
+            "insert": "#/$defs/Insert",
+            "move": "#/$defs/Move",
+            "ripple": "#/$defs/Ripple",
+            "set_property": "#/$defs/SetProperty",
+            "split": "#/$defs/Split",
+            "trim": "#/$defs/Trim"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Trim"
+          },
+          {
+            "$ref": "#/$defs/Move"
+          },
+          {
+            "$ref": "#/$defs/Insert"
+          },
+          {
+            "$ref": "#/$defs/Delete"
+          },
+          {
+            "$ref": "#/$defs/SetProperty"
+          },
+          {
+            "$ref": "#/$defs/AddMarker"
+          },
+          {
+            "$ref": "#/$defs/AddTransition"
+          },
+          {
+            "$ref": "#/$defs/Split"
+          },
+          {
+            "$ref": "#/$defs/Ripple"
+          }
+        ]
+      },
+      "title": "Ops",
+      "type": "array"
+    }
+  },
+  "title": "EditPlan",
+  "type": "object"
+}
