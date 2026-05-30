@@ -1,0 +1,24 @@
+{
+  "notes": "tighten the open and flag the b-roll",
+  "ops": [
+    {
+      "op": "trim",
+      "clip_id": "c56kphs",
+      "edge": "out",
+      "delta": -12
+    },
+    {
+      "op": "add_marker",
+      "clip_id": "c5s0wur",
+      "frame": 0,
+      "color": "Blue",
+      "name": "review"
+    },
+    {
+      "op": "set_property",
+      "clip_id": "c4iyhj",
+      "key": "ZoomX",
+      "value": 1.2
+    }
+  ]
+}

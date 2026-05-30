@@ -72,6 +72,29 @@ def build_cut() -> otio.schema.Timeline:
     return tl
 
 
+def write_recorded_plan(otio_path: str) -> str:
+    """Emit plan.json referencing real clip IDs from cut.otio, so the offline e2e never drifts."""
+    import json
+
+    from filmgrip.core.ir import TimelineIR  # local import; deps installed in the venv
+
+    ir = TimelineIR.from_otio_file(otio_path)
+    by_name = {c.name: c for c in ir.real_clips()}
+    plan = {
+        "notes": "tighten the open and flag the b-roll",
+        "ops": [
+            {"op": "trim", "clip_id": by_name["intro"].id, "edge": "out", "delta": -12},
+            {"op": "add_marker", "clip_id": by_name["dialogue_a"].id, "frame": 0,
+             "color": "Blue", "name": "review"},
+            {"op": "set_property", "clip_id": by_name["broll_1"].id, "key": "ZoomX", "value": 1.2},
+        ],
+    }
+    out = os.path.join(HERE, "plan.json")
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(plan, fh, indent=2)
+    return out
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -80,6 +103,8 @@ def main() -> None:
         1 for tr in tl.tracks for ch in tr if isinstance(ch, otio.schema.Clip)
     )
     print(f"wrote {out} — {n_clips} clips across {len(tl.tracks)} tracks")
+    plan_path = write_recorded_plan(out)
+    print(f"wrote {plan_path}")
 
 
 if __name__ == "__main__":
