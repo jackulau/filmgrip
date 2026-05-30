@@ -17,8 +17,16 @@ from typing import Any, Optional
 import opentimelineio as otio
 
 from ..core.ir import TimelineIR
-from .base import Capabilities, GrabAdapter, Selection
-from .resolve_client import ResolveSession, connect, require
+from ..protocol.editplan import EditPlan
+from ..protocol.validate import validate
+from .base import ApplyResult, Capabilities, GrabAdapter, Selection
+from .resolve_client import ResolveOperationFailed, ResolveSession, connect, require
+
+# Ops the Resolve scripting API can apply in place, reliably. Everything else (precise
+# move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
+# OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
+# the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
+LIVE_OPS = frozenset({"add_marker", "set_property", "delete"})
 
 
 def _media_url(item: Any) -> str:
@@ -148,3 +156,88 @@ class ResolveAdapter(GrabAdapter):
         note = ("Resolve exposes no true multi-clip timeline selection; reconstructed from "
                 "GetCurrentVideoItem + media-pool selection.")
         return Selection(ids=ids, basis="current_video_item+media_pool", note=note)
+
+    # -- write ------------------------------------------------------------------
+    def apply(self, plan: EditPlan, source: Any, **kw) -> ApplyResult:
+        """Apply a validated EditPlan live, with compensating rollback.
+
+        Resolve's scripting API has no begin/end-undo transaction, and fails *silently* (falsy
+        returns). So film-grip validates first, then applies each live op while pushing an inverse
+        onto a rollback stack; any silent failure aborts and unwinds the inverses, leaving the
+        timeline as it was. Ops outside :data:`LIVE_OPS` are reported as needing the OTIO-rebuild
+        path rather than half-applied.
+        """
+        session = source if isinstance(source, ResolveSession) else connect(source)
+        if session is None:
+            return ApplyResult(ok=False, errors=["Resolve is not running — open a project first."])
+
+        ir = self.snapshot(session)
+        timeline = session.current_timeline()
+        result = validate(plan, ir)
+        if not result.ok:
+            return ApplyResult(ok=False, errors=[str(e) for e in result.errors])
+
+        rebuild_needed = [op.op for op in plan.ops if op.op not in LIVE_OPS]
+        live_ops = [op for op in plan.ops if op.op in LIVE_OPS]
+
+        applied: list[str] = []
+        rollback: list = []
+        try:
+            for op in live_ops:
+                desc, inverse = self._apply_one(op, ir, timeline)
+                applied.append(desc)
+                if inverse is not None:
+                    rollback.append(inverse)
+        except ResolveOperationFailed as exc:
+            for inv in reversed(rollback):
+                try:
+                    inv()
+                except Exception:
+                    pass
+            return ApplyResult(ok=False, errors=[f"aborted + rolled back: {exc}"], applied=applied)
+
+        warnings = []
+        if rebuild_needed:
+            warnings.append(
+                f"{len(rebuild_needed)} op(s) need the OTIO-rebuild path (not live-applicable in "
+                f"Resolve): {sorted(set(rebuild_needed))}"
+            )
+        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no live ops)"
+        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+
+    def _apply_one(self, op, ir: TimelineIR, timeline: Any):
+        """Apply one live op against its native handle; return (description, inverse_callable)."""
+        clip = ir.clip(op.clip_id)
+        item = getattr(clip, "native", None)
+        if item is None:
+            raise ResolveOperationFailed(f"no native handle for clip '{op.clip_id}'")
+
+        if op.op == "add_marker":
+            require(item.AddMarker(op.frame, op.color, op.name, op.note, op.duration, ""),
+                    f"AddMarker failed on '{clip.name}'")
+            return (f"marker {op.color} on {clip.name} @+{op.frame}",
+                    lambda: item.DeleteMarkerAtFrame(op.frame))
+
+        if op.op == "set_property":
+            if op.key == "name":
+                old = item.GetName()
+                require(item.SetName(str(op.value)), f"SetName failed on '{clip.name}'")
+                return (f"rename {clip.name} -> {op.value}", lambda: item.SetName(old))
+            if op.key == "color":
+                old = item.GetClipColor() if hasattr(item, "GetClipColor") else ""
+                require(item.SetClipColor(str(op.value)), f"SetClipColor failed on '{clip.name}'")
+                inverse = (lambda: item.SetClipColor(old)) if old else (lambda: item.ClearClipColor())
+                return (f"color {clip.name} = {op.value}", inverse)
+            old = item.GetProperty(op.key) if hasattr(item, "GetProperty") else None
+            require(item.SetProperty(op.key, op.value), f"SetProperty {op.key} failed on '{clip.name}'")
+            return (f"set {clip.name}.{op.key} = {op.value!r}",
+                    lambda: item.SetProperty(op.key, old))
+
+        if op.op == "delete":
+            require(timeline, "no timeline handle for delete")
+            require(timeline.DeleteClips([item], bool(op.ripple)),
+                    f"DeleteClips failed on '{clip.name}'")
+            # Delete is not cleanly reversible via the API; no inverse (validated up-front).
+            return (f"delete {clip.name}", None)
+
+        raise ResolveOperationFailed(f"op '{op.op}' is not a live op")

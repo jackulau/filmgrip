@@ -126,9 +126,21 @@ class FakeTimelineItem:
         }
         return True
 
+    def DeleteMarkerAtFrame(self, frame) -> bool:
+        self.calls.append(("DeleteMarkerAtFrame", frame))
+        return self._markers.pop(float(frame), None) is not None
+
+    def GetClipColor(self) -> str:
+        return self._color
+
     def SetClipColor(self, color: str) -> bool:
         self.calls.append(("SetClipColor", color))
         self._color = color
+        return True
+
+    def ClearClipColor(self) -> bool:
+        self.calls.append(("ClearClipColor",))
+        self._color = ""
         return True
 
     def SetName(self, name: str) -> bool:
