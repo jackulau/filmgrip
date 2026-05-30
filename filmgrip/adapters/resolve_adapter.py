@@ -19,6 +19,7 @@ import opentimelineio as otio
 from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
+from ..serialize.fgx import parse_track_code
 from .base import ApplyResult, Capabilities, GrabAdapter, Selection
 from .interchange import REBUILD_OPS, OtioMutator
 from .resolve_client import (
@@ -35,6 +36,12 @@ from .resolve_client import (
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
 LIVE_OPS = frozenset({"add_marker", "set_property", "delete"})
+
+# Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
+# import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
+# add, are applied BEFORE any structural rebuild so the export captures them. (D7 grows this set with
+# rename_track / create_bin / move_to_bin.)
+LIVE_EXTRA_OPS = frozenset({"import_audio", "add_track"})
 
 
 def _native_call(obj: Any, method: str, *args):
@@ -77,6 +84,11 @@ def _timeline_rate(timeline: Any, default: float = 24.0) -> float:
 
 class ResolveAdapter(GrabAdapter):
     name = "resolve"
+
+    def __init__(self, sfx_library: Any = None):
+        # Optional injected SfxLibrary so import_audio can resolve a name -> file. Loaded lazily from
+        # the default dir ($FILMGRIP_SFX_DIR / ~/.filmgrip/sfx) when not supplied.
+        self._sfx_library = sfx_library
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -199,24 +211,24 @@ class ResolveAdapter(GrabAdapter):
         if not result.ok:
             return ApplyResult(ok=False, errors=[str(e) for e in result.errors])
 
-        # Structural ops (trim/move/split/insert/ripple) can't be applied precisely by the live
-        # scripting API, so any plan containing one routes through the OTIO rebuild — which applies
-        # the WHOLE plan atomically (OtioMutator also handles marker/property/delete). Plans that
-        # are purely live ops keep the lossless fast-path.
+        # Three op classes:
+        #  • live    (marker/property/delete) — mutate an existing clip in place, reversible.
+        #  • extra   (import_audio/add_track)  — ADD media/structure live; reversible best-effort.
+        #  • struct  (trim/move/split/insert/ripple) — need the lossy OTIO rebuild.
+        # Apply live + extra IN PLACE first (so the export captures added audio/tracks), then route
+        # the structural ops — structural-only — through the rebuild. Pure live/extra plans never
+        # trigger a rebuild, so a plain "add a whoosh" stays lossless.
+        live_ops = [op for op in plan.ops if op.op in LIVE_OPS or op.op in LIVE_EXTRA_OPS]
         structural = [op for op in plan.ops if op.op in REBUILD_OPS and op.op not in LIVE_OPS]
-        if structural:
-            return self._apply_via_rebuild(plan, session, ir, timeline)
-
-        live_ops = [op for op in plan.ops if op.op in LIVE_OPS]
-        not_applicable = [op.op for op in plan.ops
-                          if op.op not in LIVE_OPS and op.op not in REBUILD_OPS]
+        not_applicable = [op.op for op in plan.ops if op.op not in LIVE_OPS
+                          and op.op not in LIVE_EXTRA_OPS and op.op not in REBUILD_OPS]
 
         applied: list[str] = []
         rollback: list = []
         warnings: list[str] = []
         try:
             for op in live_ops:
-                desc, inverse, warn = self._apply_one(op, ir, timeline)
+                desc, inverse, warn = self._apply_one(op, ir, timeline, session)
                 applied.append(desc)
                 if inverse is not None:
                     rollback.append(inverse)
@@ -229,6 +241,19 @@ class ResolveAdapter(GrabAdapter):
                 except Exception:
                     pass
             return ApplyResult(ok=False, errors=[f"aborted + rolled back: {exc}"], applied=applied)
+
+        if structural:
+            sub = EditPlan(notes=plan.notes, ops=structural)
+            res = self._apply_via_rebuild(sub, session, ir, timeline)
+            if not res.ok:
+                for inv in reversed(rollback):  # unwind the in-place live/extra ops
+                    try:
+                        inv()
+                    except Exception:
+                        pass
+                return ApplyResult(ok=False, applied=applied, errors=res.errors)
+            applied += res.applied
+            warnings += res.warnings
 
         if not_applicable:
             warnings.append(
@@ -300,13 +325,71 @@ class ResolveAdapter(GrabAdapter):
                 op.clip_id = match.id
         return warnings
 
-    def _apply_one(self, op, ir: TimelineIR, timeline: Any):
+    # -- live media / structure ops (import_audio, add_track) -------------------
+    def _sfx_path(self, op) -> str:
+        """Resolve an import_audio op to a concrete audio file path (explicit src_ref or SFX name)."""
+        if op.src_ref:
+            return op.src_ref
+        from ..audio.library import SfxLibrary
+        lib = self._sfx_library or SfxLibrary.load()
+        entry = lib.get(op.sfx) or lib.resolve(op.sfx)
+        if entry is None:
+            raise ResolveOperationFailed(
+                f"sound effect '{op.sfx}' not found in the SFX library at {lib.base} "
+                f"(check `film-grip sfx list`)")
+        return str(entry.path(lib.base))
+
+    def _import_audio(self, op, timeline: Any, session: ResolveSession):
+        """Import an audio file into the media pool and place it on an audio track."""
+        path = self._sfx_path(op)
+        mp = require(session.media_pool(), "no media pool (open a project first)")
+        imported = require(_native_call(mp, "ImportMedia", [path]),
+                           f"ImportMedia({path}) failed")
+        mpi = imported[0] if isinstance(imported, list) and imported else imported
+        require(mpi, f"ImportMedia({path}) returned nothing")
+
+        _, idx = parse_track_code(op.track)
+        if idx > int(timeline.GetTrackCount("audio") or 0):
+            raise ResolveOperationFailed(
+                f"audio track '{op.track}' does not exist — add one first (add_track audio)")
+        clip_info: dict[str, Any] = {"mediaPoolItem": mpi, "mediaType": 2,
+                                     "trackIndex": idx, "recordFrame": op.at_start}
+        if op.duration is not None:
+            clip_info["startFrame"] = op.source_in
+            clip_info["endFrame"] = op.source_in + op.duration
+        appended = require(_native_call(mp, "AppendToTimeline", [clip_info]),
+                           f"AppendToTimeline failed for '{path}' on {op.track}")
+        inverse = None
+        if isinstance(appended, list) and appended:
+            placed = appended[0]
+            inverse = lambda: _native_call(timeline, "DeleteClips", [placed], False)  # noqa: E731
+        label = op.sfx or path
+        return (f"import_audio {label} → {op.track} @ {op.at_start}", inverse, None)
+
+    def _add_track(self, op, timeline: Any):
+        if op.kind == "audio":
+            require(_native_call(timeline, "AddTrack", "audio", op.audio_type),
+                    f"AddTrack audio ({op.audio_type}) failed")
+            desc = f"add_track audio ({op.audio_type})"
+        else:
+            require(_native_call(timeline, "AddTrack", op.kind), f"AddTrack {op.kind} failed")
+            desc = f"add_track {op.kind}"
+        # Resolve has no reliable scripted track-removal, so this is not auto-reversible.
+        return (desc, None, "added a track (track removal is not scriptable — undo in Resolve if needed)")
+
+    def _apply_one(self, op, ir: TimelineIR, timeline: Any, session: ResolveSession = None):
         """Apply one live op against its native handle.
 
         Returns ``(description, inverse_callable_or_None, warning_or_None)``. Required calls go
         through :func:`_native_call` so a phantom/failed Resolve method aborts + rolls back; the
         rename path is best-effort (Resolve has no reliable per-item rename).
         """
+        # Ops that add media/structure don't target an existing clip handle.
+        if op.op == "import_audio":
+            return self._import_audio(op, timeline, session)
+        if op.op == "add_track":
+            return self._add_track(op, timeline)
+
         clip = ir.clip(op.clip_id)
         item = getattr(clip, "native", None)
         if item is None:

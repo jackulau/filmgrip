@@ -223,6 +223,13 @@ class FakeTimeline:
             self._tracks[key] = [i for i in lst if i not in items]
         return True
 
+    def AddTrack(self, track_type: str, sub_track_type=None) -> bool:
+        self.calls.append(("AddTrack", track_type, sub_track_type))
+        idx = self.GetTrackCount(track_type) + 1
+        self._tracks[(track_type, idx)] = []
+        self._track_names[(track_type, idx)] = f"{track_type[0].upper()}{idx}"
+        return True
+
     def Export(self, path, export_type=None, export_subtype=None) -> bool:
         """Serialize this fake timeline to OTIO, mirroring ResolveAdapter.snapshot's layout.
 

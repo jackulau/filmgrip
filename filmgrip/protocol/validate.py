@@ -104,8 +104,22 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
     def warn(code, i, name, msg, cid=None):
         res.warnings.append(OpError(code, i, name, msg, cid))
 
+    # A plan can add_track then target it, so track-existence is evaluated against the timeline
+    # PLUS tracks created by earlier ops in the same plan.
+    added = {"video": 0, "audio": 0, "subtitle": 0}
+
+    def track_exists(code: str) -> bool:
+        try:
+            kind, idx = parse_track_code(code)
+        except Exception:
+            return False
+        return 1 <= idx <= ir.track_count(kind) + added.get(kind, 0)
+
     for i, op in enumerate(plan.ops):
         name = op.op
+        if name == "add_track":
+            added[op.kind] = added.get(op.kind, 0) + 1
+            continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
                     "split", "move_to_bin"):
@@ -139,7 +153,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
 
         elif name == "move":
             track_code = op.to_track or _code_of(clip)
-            if op.to_track and not _track_exists(ir, op.to_track):
+            if op.to_track and not track_exists(op.to_track):
                 err(TRACK_NOT_FOUND, i, name, f"track '{op.to_track}' does not exist", op.clip_id)
             else:
                 others = _clips_on_code(ir, track_code, exclude=op.clip_id)
@@ -150,7 +164,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                         op.clip_id)
 
         elif name == "insert":
-            if not _track_exists(ir, op.track):
+            if not track_exists(op.track):
                 err(TRACK_NOT_FOUND, i, name, f"track '{op.track}' does not exist", None)
             else:
                 others = _clips_on_code(ir, op.track)
@@ -182,7 +196,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                     f"split frame {op.at_frame} not inside clip {clip.start}..{clip.end}", op.clip_id)
 
         elif name == "ripple":
-            if op.track and not _track_exists(ir, op.track):
+            if op.track and not track_exists(op.track):
                 err(TRACK_NOT_FOUND, i, name, f"track '{op.track}' does not exist", None)
             affected = ir.clips if not op.track else _clips_on_code(ir, op.track)
             for c in affected:
@@ -194,7 +208,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
         elif name == "import_audio":
             if not (op.sfx or op.src_ref):
                 err(NO_AUDIO_SOURCE, i, name, "import_audio needs 'sfx' or 'src_ref'", None)
-            elif not _track_exists(ir, op.track):
+            elif not track_exists(op.track):
                 err(TRACK_NOT_FOUND, i, name, f"audio track '{op.track}' does not exist "
                     f"(add it with add_track first)", None)
             else:
@@ -211,7 +225,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                 # clamps/places at apply time (a warning, not a hard pre-check).
 
         elif name == "rename_track":
-            if not _track_exists(ir, op.track):
+            if not track_exists(op.track):
                 err(TRACK_NOT_FOUND, i, name, f"track '{op.track}' does not exist", None)
 
         # add_track / create_bin / move_to_bin: shape is guaranteed at parse time; their live
