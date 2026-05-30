@@ -230,6 +230,13 @@ class FakeTimeline:
         self._track_names[(track_type, idx)] = f"{track_type[0].upper()}{idx}"
         return True
 
+    def SetTrackName(self, track_type: str, index: int, name: str) -> bool:
+        self.calls.append(("SetTrackName", track_type, index, name))
+        if (track_type, index) not in self._tracks:
+            return False
+        self._track_names[(track_type, index)] = name
+        return True
+
     def Export(self, path, export_type=None, export_subtype=None) -> bool:
         """Serialize this fake timeline to OTIO, mirroring ResolveAdapter.snapshot's layout.
 
@@ -266,12 +273,32 @@ class FakeTimeline:
         return True
 
 
+class FakeFolder:
+    """A media-pool bin: a name, nested subfolders, and the clips it holds."""
+
+    def __init__(self, name: str = "Master"):
+        self._name = name
+        self._subs: list["FakeFolder"] = []
+        self._clips: list[Any] = []
+
+    def GetName(self) -> str:
+        return self._name
+
+    def GetSubFolderList(self) -> list["FakeFolder"]:
+        return list(self._subs)
+
+    def GetClipList(self) -> list:
+        return list(self._clips)
+
+
 class FakeMediaPool:
     def __init__(self, selected: Optional[list[FakeMediaPoolItem]] = None):
         self._selected = list(selected or [])
         self.append_log: list[Any] = []
         self.imported_timelines: list[str] = []
         self.imported_media: list[Any] = []
+        self._root = FakeFolder("Master")
+        self.moved: list[tuple] = []
 
     def GetSelectedClips(self) -> list[FakeMediaPoolItem]:
         return list(self._selected)
@@ -301,8 +328,18 @@ class FakeMediaPool:
         self.imported_timelines.append(path)
         return _fake_timeline_from_otio(path)
 
-    def GetRootFolder(self):
-        return None
+    def GetRootFolder(self) -> FakeFolder:
+        return self._root
+
+    def AddSubFolder(self, folder: FakeFolder, name: str) -> FakeFolder:
+        sub = FakeFolder(name)
+        folder._subs.append(sub)
+        return sub
+
+    def MoveClips(self, clips, target: FakeFolder) -> bool:
+        self.moved.append(([getattr(c, "GetName", lambda: c)() for c in clips], target.GetName()))
+        target._clips.extend(clips)
+        return True
 
 
 class FakeProject:

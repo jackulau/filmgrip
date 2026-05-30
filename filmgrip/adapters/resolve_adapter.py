@@ -41,7 +41,9 @@ LIVE_OPS = frozenset({"add_marker", "set_property", "delete"})
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
 # add, are applied BEFORE any structural rebuild so the export captures them. (D7 grows this set with
 # rename_track / create_bin / move_to_bin.)
-LIVE_EXTRA_OPS = frozenset({"import_audio", "add_track"})
+LIVE_EXTRA_OPS = frozenset({
+    "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
+})
 
 
 def _native_call(obj: Any, method: str, *args):
@@ -377,6 +379,52 @@ class ResolveAdapter(GrabAdapter):
         # Resolve has no reliable scripted track-removal, so this is not auto-reversible.
         return (desc, None, "added a track (track removal is not scriptable — undo in Resolve if needed)")
 
+    def _rename_track(self, op, timeline: Any):
+        kind, idx = parse_track_code(op.track)
+        old = timeline.GetTrackName(kind, idx) if hasattr(timeline, "GetTrackName") else ""
+        require(_native_call(timeline, "SetTrackName", kind, idx, op.name),
+                f"SetTrackName on {op.track} failed")
+        inverse = ((lambda: _native_call(timeline, "SetTrackName", kind, idx, old)) if old else None)
+        return (f"rename_track {op.track} → {op.name!r}", inverse, None)
+
+    @staticmethod
+    def _find_folder(root: Any, name: str):
+        subs = root.GetSubFolderList() if hasattr(root, "GetSubFolderList") else []
+        for f in subs or []:
+            if (f.GetName() if hasattr(f, "GetName") else "") == name:
+                return f
+        return None
+
+    def _create_bin(self, op, session: ResolveSession):
+        mp = require(session.media_pool(), "no media pool (open a project first)")
+        root = require(_native_call(mp, "GetRootFolder"), "GetRootFolder failed")
+        parent, warn = root, None
+        if op.parent:
+            found = self._find_folder(root, op.parent)
+            if found is None:
+                warn = f"parent bin '{op.parent}' not found — created '{op.name}' at the media-pool root"
+            else:
+                parent = found
+        require(_native_call(mp, "AddSubFolder", parent, op.name), f"AddSubFolder '{op.name}' failed")
+        loc = f" under '{op.parent}'" if (op.parent and warn is None) else ""
+        # Bin deletion isn't reliably scriptable -> no inverse.
+        return (f"create_bin '{op.name}'{loc}", None, warn)
+
+    def _move_to_bin(self, op, ir: TimelineIR, session: ResolveSession):
+        clip = ir.clip(op.clip_id)
+        item = getattr(clip, "native", None) if clip is not None else None
+        mpi = item.GetMediaPoolItem() if item is not None and hasattr(item, "GetMediaPoolItem") else None
+        if mpi is None:
+            raise ResolveOperationFailed(f"no media-pool item backing clip '{op.clip_id}'")
+        mp = require(session.media_pool(), "no media pool (open a project first)")
+        root = require(_native_call(mp, "GetRootFolder"), "GetRootFolder failed")
+        target = self._find_folder(root, op.bin) \
+            or require(_native_call(mp, "AddSubFolder", root, op.bin),
+                       f"could not create destination bin '{op.bin}'")
+        require(_native_call(mp, "MoveClips", [mpi], target), f"MoveClips to '{op.bin}' failed")
+        return (f"move_to_bin {clip.name} → '{op.bin}'", None,
+                "media moved between media-pool bins (not auto-reversible)")
+
     def _apply_one(self, op, ir: TimelineIR, timeline: Any, session: ResolveSession = None):
         """Apply one live op against its native handle.
 
@@ -384,11 +432,17 @@ class ResolveAdapter(GrabAdapter):
         through :func:`_native_call` so a phantom/failed Resolve method aborts + rolls back; the
         rename path is best-effort (Resolve has no reliable per-item rename).
         """
-        # Ops that add media/structure don't target an existing clip handle.
+        # Ops that add media/structure/organization don't target an existing clip handle.
         if op.op == "import_audio":
             return self._import_audio(op, timeline, session)
         if op.op == "add_track":
             return self._add_track(op, timeline)
+        if op.op == "rename_track":
+            return self._rename_track(op, timeline)
+        if op.op == "create_bin":
+            return self._create_bin(op, session)
+        if op.op == "move_to_bin":
+            return self._move_to_bin(op, ir, session)
 
         clip = ir.clip(op.clip_id)
         item = getattr(clip, "native", None)
