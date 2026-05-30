@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
     st.add_argument("--sfx-dir", dest="sfx_dir", help="SFX folder to report (default: ~/.filmgrip/sfx)")
 
+    panel = sub.add_parser("panel", help="install the in-Resolve panel (Workspace ▸ Scripts ▸ film-grip)")
+    panel.add_argument("panel_action", nargs="?", choices=["install"], default="install")
+    panel.add_argument("--dry-run", action="store_true", help="show the install target without writing")
+    panel.add_argument("--dir", help="override Resolve's Edit-page Scripts folder")
+
     sfx = sub.add_parser("sfx", help="inspect the sound-effects library Claude can pull from")
     sfx.add_argument("sfx_action", nargs="?", choices=["list", "scan", "resolve"], default="list",
                      help="list effects (default), scan the folder into a manifest, or resolve a description")
@@ -63,6 +68,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_status import cmd_status
 
         return cmd_status(args)
+    if args.command == "panel":
+        from .cli_panel import cmd_panel
+
+        return cmd_panel(args)
     parser.print_help()
     return 0
 
