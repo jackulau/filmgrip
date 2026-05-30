@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+*.tsbuildinfo
+.npm/
+
+# film-grip runtime / per-developer state
+.claude-workspace/
+*.log
+*.tmp
+*.bak
+.DS_Store
+
+# generated interchange / scratch
+scratch/
+*.otio.tmp

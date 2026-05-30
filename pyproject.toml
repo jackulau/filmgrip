@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "film-grip"
+version = "0.1.0"
+description = "react-grab for video editors: select clips, prompt, and Claude auto-edits across DaVinci Resolve, Premiere, Filmora and more via a universal OTIO IR + typed edit protocol."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Jack Lau" }]
+keywords = ["video-editing", "davinci-resolve", "premiere", "opentimelineio", "claude", "mcp", "ai"]
+
+# Base deps — what the core IR / protocol / serializer / CLI need to run and what
+# the D1 smoke test imports. Heavy/optional integrations live in extras so a flaky
+# transitive dependency never breaks the foundation.
+dependencies = [
+  "opentimelineio==0.18.1",
+  "pydantic>=2.6",
+  "lxml>=5.0",
+  "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+# Claude Agent SDK (D9/D16). Kept optional so core tests run without it; the MCP
+# host imports defensively and tests stub the SDK transport.
+agent = ["claude-agent-sdk>=0.1.0"]
+# Avid AAF read/write (D11)
+aaf = ["pyaaf2>=1.7"]
+# Everything, for a full local dev/install.
+all = ["claude-agent-sdk>=0.1.0", "pyaaf2>=1.7"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+film-grip = "filmgrip.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["filmgrip*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "live: tests that require a running editor (DaVinci Resolve); auto-skipped when the app is unreachable",
+]
