@@ -15,6 +15,7 @@ code is the contract (0 ok, 1 invalid/rejected plan, 2 editor unreachable, 3 uns
 from __future__ import annotations
 
 import json
+import os
 from typing import Optional
 
 from .adapters.base import Selection
@@ -41,6 +42,11 @@ def _selection_from_plan(ir: TimelineIR, plan: Optional[EditPlan]) -> list[str]:
             return ids
     reals = ir.real_clips()
     return [reals[0].id] if reals else []
+
+
+def _derived_out(path: str) -> str:
+    stem, ext = os.path.splitext(path)
+    return f"{stem}.edited{ext}"
 
 
 def _emit(text: str) -> None:
@@ -73,16 +79,15 @@ def _run_fixture(args) -> int:
         _emit(diff)
         return 0 if validate(plan, ir).ok else 1
 
-    # Applying to a fixture file = the OTIO-rebuild path (mutate OTIO, write back). That lives in
-    # the interchange adapter (D11); wire it when present, else say so honestly.
-    try:
-        from .adapters.interchange import InterchangeAdapter
-    except ImportError:
-        _emit("note: writing edits to a fixture file needs the interchange adapter (D11). "
-              "Use --dry-run to preview.")
-        return 3
-    res = InterchangeAdapter().apply(plan, args.fixture, out_path=args.fixture)
-    _emit(res.diff)
+    # Applying to a fixture file = the OTIO-rebuild path (mutate OTIO, write a NEW file). Never
+    # overwrite the source in place — default to a derived path so the input is preserved.
+    from .adapters.interchange import InterchangeAdapter
+
+    out = args.out or _derived_out(args.fixture)
+    res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
+    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
+    for w in res.warnings:
+        _emit(f"  ⚠ {w}")
     return 0 if res.ok else 1
 
 

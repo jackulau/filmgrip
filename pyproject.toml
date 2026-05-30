@@ -28,9 +28,13 @@ dependencies = [
 agent = ["claude-agent-sdk>=0.1.0"]
 # Avid AAF read/write (D11)
 aaf = ["pyaaf2>=1.7"]
+# Interchange adapters: FCPXML (FCP7 + FCPX), EDL/CMX3600, AAF, ALE, kdenlive, etc.
+interchange = ["OpenTimelineIO-Plugins>=0.17", "otio-fcpx-xml-adapter>=0.1"]
 # Everything, for a full local dev/install.
-all = ["claude-agent-sdk>=0.1.0", "pyaaf2>=1.7"]
-dev = ["pytest>=8.0"]
+all = ["claude-agent-sdk>=0.1.0", "pyaaf2>=1.7", "OpenTimelineIO-Plugins>=0.17",
+       "otio-fcpx-xml-adapter>=0.1"]
+# Dev/test: includes interchange adapters so the full suite runs.
+dev = ["pytest>=8.0", "OpenTimelineIO-Plugins>=0.17", "otio-fcpx-xml-adapter>=0.1"]
 
 [project.scripts]
 film-grip = "filmgrip.cli:main"

@@ -95,6 +95,44 @@ def write_recorded_plan(otio_path: str) -> str:
     return out
 
 
+def _clip_with_media(name: str, src_start: int, dur: int) -> otio.schema.Clip:
+    return otio.schema.Clip(
+        name=name,
+        media_reference=otio.schema.ExternalReference(
+            target_url=f"/media/{name}.mov",
+            available_range=otio.opentime.TimeRange(rt(0), rt(2000))),  # known media length
+        source_range=otio.opentime.TimeRange(rt(src_start), rt(dur)),
+    )
+
+
+def write_sample_fcpxml() -> str:
+    """A FCPXML with a transition, so interchange write-back emits a lossy-fidelity warning."""
+    tl = otio.schema.Timeline(name="Sample FCPXML")
+    tl.global_start_time = rt(0)
+    v = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+    v.append(_clip_with_media("shotA", 100, 60))
+    v.append(dissolve())
+    v.append(_clip_with_media("shotB", 200, 80))
+    v.append(_clip_with_media("shotC", 0, 40))
+    tl.tracks.append(v)
+    out = os.path.join(HERE, "sample.fcpxml")
+    otio.adapters.write_to_file(tl, out, adapter_name="fcp_xml")
+    return out
+
+
+def write_sample_edl() -> str:
+    """A simple single-track EDL (cuts only — the lowest common denominator)."""
+    tl = otio.schema.Timeline(name="Sample EDL")
+    tl.global_start_time = rt(0)
+    v = otio.schema.Track(name="V", kind=otio.schema.TrackKind.Video)
+    for nm, ss, d in [("a", 100, 48), ("b", 200, 72), ("c", 0, 36)]:
+        v.append(_clip_with_media(nm, ss, d))
+    tl.tracks.append(v)
+    out = os.path.join(HERE, "sample.edl")
+    otio.adapters.write_to_file(tl, out, adapter_name="cmx_3600")
+    return out
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -105,6 +143,11 @@ def main() -> None:
     print(f"wrote {out} — {n_clips} clips across {len(tl.tracks)} tracks")
     plan_path = write_recorded_plan(out)
     print(f"wrote {plan_path}")
+    for fn in (write_sample_fcpxml, write_sample_edl):
+        try:
+            print(f"wrote {fn()}")
+        except Exception as exc:  # interchange adapters may be absent on a minimal install
+            print(f"skipped {fn.__name__}: {exc}")
 
 
 if __name__ == "__main__":

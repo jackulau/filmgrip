@@ -1,0 +1,14 @@
+TITLE: Sample EDL
+
+001  a        V     C        00:00:04:04 00:00:06:04 00:00:00:00 00:00:02:00
+* FROM CLIP NAME:  a
+* FROM CLIP: /media/a.mov
+* OTIO TRUNCATED REEL NAME FROM: a.mov
+002  b        V     C        00:00:08:08 00:00:11:08 00:00:02:00 00:00:05:00
+* FROM CLIP NAME:  b
+* FROM CLIP: /media/b.mov
+* OTIO TRUNCATED REEL NAME FROM: b.mov
+003  c        V     C        00:00:00:00 00:00:01:12 00:00:05:00 00:00:06:12
+* FROM CLIP NAME:  c
+* FROM CLIP: /media/c.mov
+* OTIO TRUNCATED REEL NAME FROM: c.mov

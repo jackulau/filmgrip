@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
     edit.add_argument("--fixture", help="run the pipeline against a .otio fixture instead of a live editor")
     edit.add_argument("--plan", help="apply a recorded EditPlan JSON instead of calling Claude (offline e2e)")
+    edit.add_argument("--out", help="output path for fixture/interchange apply (default: <name>.edited.<ext>)")
     edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
     return parser
 
