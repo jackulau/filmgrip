@@ -1,0 +1,88 @@
+{
+ "name": "fg-capcut",
+ "fps": 25,
+ "duration": 6000000,
+ "materials": {
+  "videos": [
+   {
+    "id": "mat1",
+    "path": "/media/clip_one.mp4",
+    "material_name": "clip_one.mp4"
+   },
+   {
+    "id": "mat2",
+    "path": "/media/clip_two.mp4"
+   },
+   {
+    "id": "mat3",
+    "path": "/media/clip_three.mp4"
+   }
+  ],
+  "audios": [
+   {
+    "id": "aud1",
+    "path": "/media/song.mp3"
+   }
+  ]
+ },
+ "tracks": [
+  {
+   "type": "video",
+   "segments": [
+    {
+     "id": "s1",
+     "material_id": "mat1",
+     "target_timerange": {
+      "start": 0,
+      "duration": 2400000
+     },
+     "source_timerange": {
+      "start": 0,
+      "duration": 2400000
+     }
+    },
+    {
+     "id": "s2",
+     "material_id": "mat2",
+     "target_timerange": {
+      "start": 2400000,
+      "duration": 2400000
+     },
+     "source_timerange": {
+      "start": 0,
+      "duration": 2400000
+     }
+    },
+    {
+     "id": "s3",
+     "material_id": "mat3",
+     "target_timerange": {
+      "start": 4800000,
+      "duration": 1200000
+     },
+     "source_timerange": {
+      "start": 0,
+      "duration": 1200000
+     }
+    }
+   ]
+  },
+  {
+   "type": "audio",
+   "segments": [
+    {
+     "id": "a1",
+     "material_id": "aud1",
+     "target_timerange": {
+      "start": 0,
+      "duration": 6000000
+     },
+     "source_timerange": {
+      "start": 0,
+      "duration": 6000000
+     }
+    }
+   ]
+  }
+ ]
+}

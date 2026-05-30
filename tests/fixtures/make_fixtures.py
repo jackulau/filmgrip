@@ -162,6 +162,47 @@ def write_sample_mlt() -> list[str]:
     return paths
 
 
+def write_capcut() -> list[str]:
+    """An unencrypted CapCut International draft (fps 25 -> 40000us/frame, exact) + an encrypted blob."""
+    import json
+
+    def seg(sid, mid, start_us, dur_us):
+        return {"id": sid, "material_id": mid,
+                "target_timerange": {"start": start_us, "duration": dur_us},
+                "source_timerange": {"start": 0, "duration": dur_us}}
+
+    draft = {
+        "name": "fg-capcut", "fps": 25, "duration": 6000000,
+        "materials": {
+            "videos": [
+                {"id": "mat1", "path": "/media/clip_one.mp4", "material_name": "clip_one.mp4"},
+                {"id": "mat2", "path": "/media/clip_two.mp4"},
+                {"id": "mat3", "path": "/media/clip_three.mp4"},
+            ],
+            "audios": [{"id": "aud1", "path": "/media/song.mp3"}],
+        },
+        "tracks": [
+            {"type": "video", "segments": [
+                seg("s1", "mat1", 0, 2400000),         # clip_one 0..60
+                seg("s2", "mat2", 2400000, 2400000),   # clip_two 60..120
+                seg("s3", "mat3", 4800000, 1200000),   # clip_three 120..150
+            ]},
+            {"type": "audio", "segments": [seg("a1", "aud1", 0, 6000000)]},  # song 0..150
+        ],
+    }
+    paths = []
+    good = os.path.join(HERE, "capcut_draft.json")
+    with open(good, "w", encoding="utf-8") as fh:
+        json.dump(draft, fh, ensure_ascii=False, indent=1)
+    paths.append(good)
+
+    enc = os.path.join(HERE, "capcut_encrypted.json")
+    with open(enc, "wb") as fh:
+        fh.write(b"\x00\x07JIANYING-ENCRYPTED\xff\xfe" + bytes(range(16)))
+    paths.append(enc)
+    return paths
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -178,6 +219,8 @@ def main() -> None:
         except Exception as exc:  # interchange adapters may be absent on a minimal install
             print(f"skipped {fn.__name__}: {exc}")
     for p in write_sample_mlt():
+        print(f"wrote {p}")
+    for p in write_capcut():
         print(f"wrote {p}")
 
 
