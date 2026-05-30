@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
 
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
+
+    sfx = sub.add_parser("sfx", help="inspect the sound-effects library Claude can pull from")
+    sfx.add_argument("sfx_action", nargs="?", choices=["list", "scan", "resolve"], default="list",
+                     help="list effects (default), scan the folder into a manifest, or resolve a description")
+    sfx.add_argument("query", nargs="?", default="", help="description to resolve (with 'resolve')")
+    sfx.add_argument("--dir", help="SFX folder (default: $FILMGRIP_SFX_DIR or ~/.filmgrip/sfx)")
     return parser
 
 
@@ -46,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(capability_markdown())
         return 0
+    if args.command == "sfx":
+        from .audio.library import cmd_sfx
+
+        return cmd_sfx(args)
     parser.print_help()
     return 0
 

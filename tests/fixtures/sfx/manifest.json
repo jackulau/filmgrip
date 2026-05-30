@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "effects": [
+    {"name": "whoosh", "file": "whoosh_01.wav", "tags": ["transition", "swoosh", "fast", "title"], "duration_frames": 18},
+    {"name": "door_slam", "file": "door_slam.wav", "tags": ["impact", "slam", "door", "hit"]},
+    {"name": "riser", "file": "riser_long.wav", "tags": ["build", "tension", "rise", "drone"]},
+    {"name": "ghost_missing", "file": "not_here.wav", "tags": ["broken"]}
+  ]
+}
