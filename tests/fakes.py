@@ -143,10 +143,8 @@ class FakeTimelineItem:
         self._color = ""
         return True
 
-    def SetName(self, name: str) -> bool:
-        self.calls.append(("SetName", name))
-        self._name = name
-        return True
+    # NOTE: real Resolve TimelineItem has NO SetName — renaming goes through the MediaPoolItem's
+    # "Clip Name" property. The fake omits SetName deliberately so tests match the live API.
 
 
 class FakeTimeline:

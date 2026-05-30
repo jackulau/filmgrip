@@ -60,8 +60,8 @@ def test_set_property_and_rename_map_to_native_calls():
     res = adapter.apply(plan, session)
     assert res.ok
     assert ("SetProperty", "ZoomX", 1.5) in a.calls
-    assert ("SetName", "hero") in b.calls
-    assert b.GetName() == "hero"
+    # rename routes through the MediaPoolItem 'Clip Name' (Resolve has no TimelineItem.SetName)
+    assert b.GetMediaPoolItem().GetClipProperty("Clip Name") == "hero"
 
 
 def test_silent_false_aborts_and_rolls_back():

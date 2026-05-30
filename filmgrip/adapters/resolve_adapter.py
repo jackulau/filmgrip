@@ -29,6 +29,20 @@ from .resolve_client import ResolveOperationFailed, ResolveSession, connect, req
 LIVE_OPS = frozenset({"add_marker", "set_property", "delete"})
 
 
+def _native_call(obj: Any, method: str, *args):
+    """Call a Resolve object method, raising if it isn't actually implemented.
+
+    Resolve's fusionscript proxies return ``None`` (not raise) for ANY attribute name, so
+    ``hasattr`` always lies and a missing method surfaces as ``TypeError: 'NoneType' is not
+    callable`` mid-apply. Routing every native call through here turns a phantom method into a
+    clean :class:`ResolveOperationFailed` that the transaction can roll back.
+    """
+    fn = getattr(obj, method, None)
+    if not callable(fn):
+        raise ResolveOperationFailed(f"Resolve object has no callable '{method}'")
+    return fn(*args)
+
+
 def _media_url(item: Any) -> str:
     """Best-effort source path for a Resolve TimelineItem (pulled in one GetClipProperty call)."""
     mpi = item.GetMediaPoolItem() if hasattr(item, "GetMediaPoolItem") else None
@@ -182,12 +196,15 @@ class ResolveAdapter(GrabAdapter):
 
         applied: list[str] = []
         rollback: list = []
+        warnings: list[str] = []
         try:
             for op in live_ops:
-                desc, inverse = self._apply_one(op, ir, timeline)
+                desc, inverse, warn = self._apply_one(op, ir, timeline)
                 applied.append(desc)
                 if inverse is not None:
                     rollback.append(inverse)
+                if warn:
+                    warnings.append(warn)
         except ResolveOperationFailed as exc:
             for inv in reversed(rollback):
                 try:
@@ -196,7 +213,6 @@ class ResolveAdapter(GrabAdapter):
                     pass
             return ApplyResult(ok=False, errors=[f"aborted + rolled back: {exc}"], applied=applied)
 
-        warnings = []
         if rebuild_needed:
             warnings.append(
                 f"{len(rebuild_needed)} op(s) need the OTIO-rebuild path (not live-applicable in "
@@ -206,38 +222,63 @@ class ResolveAdapter(GrabAdapter):
         return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
 
     def _apply_one(self, op, ir: TimelineIR, timeline: Any):
-        """Apply one live op against its native handle; return (description, inverse_callable)."""
+        """Apply one live op against its native handle.
+
+        Returns ``(description, inverse_callable_or_None, warning_or_None)``. Required calls go
+        through :func:`_native_call` so a phantom/failed Resolve method aborts + rolls back; the
+        rename path is best-effort (Resolve has no reliable per-item rename).
+        """
         clip = ir.clip(op.clip_id)
         item = getattr(clip, "native", None)
         if item is None:
             raise ResolveOperationFailed(f"no native handle for clip '{op.clip_id}'")
 
         if op.op == "add_marker":
-            require(item.AddMarker(op.frame, op.color, op.name, op.note, op.duration, ""),
-                    f"AddMarker failed on '{clip.name}'")
+            require(_native_call(item, "AddMarker", op.frame, op.color, op.name, op.note, op.duration, ""),
+                    f"AddMarker failed on '{clip.name}' (frame {op.frame})")
             return (f"marker {op.color} on {clip.name} @+{op.frame}",
-                    lambda: item.DeleteMarkerAtFrame(op.frame))
+                    lambda: _native_call(item, "DeleteMarkerAtFrame", op.frame), None)
 
         if op.op == "set_property":
             if op.key == "name":
-                old = item.GetName()
-                require(item.SetName(str(op.value)), f"SetName failed on '{clip.name}'")
-                return (f"rename {clip.name} -> {op.value}", lambda: item.SetName(old))
+                return self._rename(clip, item, str(op.value))  # best-effort via the media-pool item
             if op.key == "color":
-                old = item.GetClipColor() if hasattr(item, "GetClipColor") else ""
-                require(item.SetClipColor(str(op.value)), f"SetClipColor failed on '{clip.name}'")
-                inverse = (lambda: item.SetClipColor(old)) if old else (lambda: item.ClearClipColor())
-                return (f"color {clip.name} = {op.value}", inverse)
-            old = item.GetProperty(op.key) if hasattr(item, "GetProperty") else None
-            require(item.SetProperty(op.key, op.value), f"SetProperty {op.key} failed on '{clip.name}'")
+                old = item.GetClipColor()
+                require(_native_call(item, "SetClipColor", str(op.value)),
+                        f"SetClipColor failed on '{clip.name}'")
+                inverse = ((lambda: _native_call(item, "SetClipColor", old)) if old
+                           else (lambda: _native_call(item, "ClearClipColor")))
+                return (f"color {clip.name} = {op.value}", inverse, None)
+            old = item.GetProperty(op.key)
+            require(_native_call(item, "SetProperty", op.key, op.value),
+                    f"SetProperty {op.key} failed on '{clip.name}'")
             return (f"set {clip.name}.{op.key} = {op.value!r}",
-                    lambda: item.SetProperty(op.key, old))
+                    lambda: _native_call(item, "SetProperty", op.key, old), None)
 
         if op.op == "delete":
             require(timeline, "no timeline handle for delete")
-            require(timeline.DeleteClips([item], bool(op.ripple)),
+            require(_native_call(timeline, "DeleteClips", [item], bool(op.ripple)),
                     f"DeleteClips failed on '{clip.name}'")
             # Delete is not cleanly reversible via the API; no inverse (validated up-front).
-            return (f"delete {clip.name}", None)
+            return (f"delete {clip.name}", None, None)
 
         raise ResolveOperationFailed(f"op '{op.op}' is not a live op")
+
+    def _rename(self, clip, item, value: str):
+        """Rename a clip via its MediaPoolItem's 'Clip Name' (Resolve has no TimelineItem.SetName).
+
+        Best-effort: Resolve's rename API is unreliable (can return falsy yet take effect, and it
+        renames the SOURCE pool clip — affecting all instances), so we never abort the whole plan
+        over it. We apply, register an inverse, and warn.
+        """
+        mpi = item.GetMediaPoolItem()
+        if mpi is None:
+            return (f"rename {clip.name} -> {value} (skipped: no media-pool item)", None,
+                    f"could not rename '{clip.name}': no backing media-pool clip")
+        old = mpi.GetClipProperty("Clip Name") or clip.name
+        ret = mpi.SetClipProperty("Clip Name", value)
+        warn = None if ret else (
+            f"rename '{clip.name}' -> '{value}' reported no-op by Resolve (its rename API is "
+            f"unreliable) and renames the SOURCE pool clip for all instances")
+        return (f"rename {clip.name} -> {value} (source pool clip)",
+                lambda: mpi.SetClipProperty("Clip Name", old), warn)
