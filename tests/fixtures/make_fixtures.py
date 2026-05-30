@@ -203,6 +203,30 @@ def write_capcut() -> list[str]:
     return paths
 
 
+def write_filmora() -> str:
+    """A newer ZIP-based .wfp containing a project.json with a tracks/clips graph (frame-based)."""
+    import json
+    import zipfile
+
+    doc = {
+        "name": "fg-filmora", "version": "13.0", "fps": 30,
+        "tracks": [
+            {"type": "video", "clips": [
+                {"name": "opening", "start": 0, "duration": 90, "in": 0, "path": "opening.mp4"},
+                {"name": "interview", "start": 90, "duration": 150, "in": 0, "path": "interview.mp4"},
+            ]},
+            {"type": "audio", "clips": [
+                {"name": "bgm", "start": 0, "duration": 240, "in": 0, "path": "bgm.mp3"},
+            ]},
+        ],
+    }
+    out = os.path.join(HERE, "sample.wfp")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("project.json", json.dumps(doc, ensure_ascii=False))
+        zf.writestr("resources/thumb.dat", b"\x00" * 8)  # non-JSON sibling, must be ignored
+    return out
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -222,6 +246,7 @@ def main() -> None:
         print(f"wrote {p}")
     for p in write_capcut():
         print(f"wrote {p}")
+    print(f"wrote {write_filmora()}")
 
 
 if __name__ == "__main__":
