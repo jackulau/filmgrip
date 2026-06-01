@@ -80,3 +80,9 @@ class ClaudeBackend:
 
 
 register("claude", ClaudeBackend)
+
+# The codex slot — a registered seam that fails honestly until implemented (see backend_codex).
+# Imported here so `codex` shows up in available_backends() and `--backend codex` resolves.
+from .backend_codex import CodexBackend  # noqa: E402  (bottom import avoids a definition cycle)
+
+register("codex", CodexBackend)

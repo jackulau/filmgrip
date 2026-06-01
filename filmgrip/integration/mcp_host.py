@@ -144,8 +144,11 @@ def plan_edit(ctx: PlannerContext, user_prompt: str, transport: Transport, *,
     """
     schema = ep.schema()
     sys_prompt = build_system_prompt(ctx)
-    resp = transport.run(system_prompt=sys_prompt, user_prompt=user_prompt, schema=schema,
-                         ctx=ctx, session_id=session_id, model=model)
+    try:
+        resp = transport.run(system_prompt=sys_prompt, user_prompt=user_prompt, schema=schema,
+                             ctx=ctx, session_id=session_id, model=model)
+    except Exception as exc:  # a backend that errors hard (missing SDK, network) must not crash callers
+        return PlanResult(ok=False, terminal=True, errors=[f"planner backend failed: {exc}"])
 
     if resp.subtype == SUBTYPE_MAX_RETRIES:
         return PlanResult(
