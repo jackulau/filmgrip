@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="list packs (default), show one, or apply one")
     pack.add_argument("name", nargs="?", default="", help="pack name (for show / apply)")
     pack.add_argument("--editor", default="resolve", help="target editor for live apply (default: resolve)")
+    pack.add_argument("--backend", help="planner backend for prompt packs (default: claude; or $FILMGRIP_BACKEND)")
     pack.add_argument("--fixture", help="apply against a .otio fixture instead of a live editor")
     pack.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
     pack.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")

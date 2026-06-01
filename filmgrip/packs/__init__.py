@@ -47,15 +47,22 @@ def register(pack: Pack) -> None:
 
 
 def get_pack(name: str) -> Pack:
-    pack = _REGISTRY.get(name)
+    """Resolve a pack by name. A user pack (``~/.filmgrip/packs``) overrides a built-in of the same name."""
+    from .loader import load_user_packs
+
+    pack = load_user_packs().get(name) or _REGISTRY.get(name)
     if pack is None:
         raise PackError(f"unknown pack '{name}'. Run `film-grip pack list` to see available packs.")
     return pack
 
 
 def all_packs() -> list[Pack]:
-    """All packs, sorted by name. (D7 layers user packs over these.)"""
-    return [p for _, p in sorted(_REGISTRY.items())]
+    """All packs (built-ins + user packs), sorted by name. User packs override built-ins by name."""
+    from .loader import load_user_packs
+
+    merged = dict(_REGISTRY)
+    merged.update(load_user_packs())  # user wins on name collision
+    return [p for _, p in sorted(merged.items())]
 
 
 def selected_clips(ir: TimelineIR, ids) -> list[Clip]:

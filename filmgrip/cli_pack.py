@@ -65,10 +65,11 @@ def _apply(args) -> int:
     except PackError as exc:
         _emit(f"error: {exc}")
         return 1
+    if pack.kind == "prompt":
+        return _apply_prompt(args, pack)
     if pack.kind != "deterministic":
-        _emit(f"error: '{pack.name}' is a {pack.kind} pack — prompt packs run through the planner; "
-              f"use `film-grip edit` (offline prompt-pack apply lands in D7).")
-        return 3
+        _emit(f"error: unknown pack kind '{pack.kind}' for '{pack.name}'.")
+        return 1
     return _apply_fixture(args, pack) if args.fixture else _apply_live(args, pack)
 
 
@@ -96,6 +97,79 @@ def _apply_fixture(args, pack) -> int:
 
     out = args.out or (os.path.splitext(args.fixture)[0] + ".edited" + os.path.splitext(args.fixture)[1])
     res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
+    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
+    for w in res.warnings:
+        _emit(f"  ⚠ {w}")
+    return 0 if res.ok else 1
+
+
+def _format_prompt(pack) -> str:
+    """Fill {placeholders} in a prompt pack from its params; fall back to the raw prompt."""
+    try:
+        return pack.prompt.format(**pack.params)
+    except (KeyError, IndexError, ValueError):
+        return pack.prompt
+
+
+def _apply_prompt(args, pack) -> int:
+    """Apply a prompt pack: hand its (parameterized) instruction to the active planner backend."""
+    from .integration.backend import UnknownBackendError, get_backend
+    from .integration.mcp_host import PlannerContext
+    from .integration.repair import plan_with_repair
+    from .protocol.validate import dry_run, validate
+
+    prompt = _format_prompt(pack)
+    try:
+        transport = get_backend(getattr(args, "backend", None)).transport()
+    except UnknownBackendError as exc:
+        _emit(f"error: {exc}")
+        return 1
+
+    session = adapter = None
+    if args.fixture:
+        from .adapters.base import Selection
+
+        ir = TimelineIR.from_otio_file(args.fixture)
+        ids = ([s.strip() for s in args.select.split(",") if s.strip()]
+               if getattr(args, "select", None) else [c.id for c in ir.real_clips()])
+        sel = Selection(ids=ids, basis="fixture")
+    else:
+        if getattr(args, "editor", "resolve") != "resolve":
+            _emit("error: live pack apply supports --editor resolve; otherwise use --fixture FILE.")
+            return 3
+        from .adapters import resolve_client as rc
+        from .adapters.resolve_adapter import ResolveAdapter
+        from .cli_edit import _preflight_message
+
+        report = rc.preflight()
+        if not report["app_running"]:
+            _emit(_preflight_message(report))
+            return 2
+        adapter = ResolveAdapter()
+        session = rc.connect()
+        ir = adapter.snapshot(session)
+        sel = adapter.get_selection(session, ir)
+
+    ctx = PlannerContext(ir=ir, selection=sel, source=session, adapter=adapter)
+    result = plan_with_repair(ctx, prompt, transport)
+    _emit("# " + result.cost_line())
+    if result.plan is None or not result.ok:
+        _emit("plan failed:\n  " + "\n  ".join(result.errors or ["no plan produced"]))
+        return 1
+    plan = result.plan
+
+    if args.dry_run:
+        _emit(dry_run(plan, ir))
+        return 0 if validate(plan, ir).ok else 1
+
+    if args.fixture:
+        from .adapters.interchange import InterchangeAdapter
+
+        out = args.out or (os.path.splitext(args.fixture)[0] + ".edited"
+                           + os.path.splitext(args.fixture)[1])
+        res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
+    else:
+        res = adapter.apply(plan, session)
     _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
     for w in res.warnings:
         _emit(f"  ⚠ {w}")

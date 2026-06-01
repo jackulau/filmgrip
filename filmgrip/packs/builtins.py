@@ -47,3 +47,19 @@ register(Pack("punch-up", "Top-and-tail the selection: fade in on the first clip
 register(Pack("dissolves", "Add a cross dissolve on the out-edge of each selected clip that has a "
                            "following clip.",
               compile=_dissolves, params={"duration": 12}))
+
+
+# --- prompt packs (D7): a saved instruction handed to the active planner backend ---------------
+# Parameters fill {placeholders} in the prompt at apply time; users can add their own prompt packs
+# as data files in ~/.filmgrip/packs (see filmgrip.packs.loader).
+register(Pack("podcast-cleanup", "Tighten a talking-head/podcast cut: close long silences and snug "
+                                 "the edits.", kind="prompt",
+              prompt="Remove silent gaps longer than {min_silence} on the selected clips and "
+                     "ripple the timeline closed so there are no holes. Do not alter clip content "
+                     "or audio levels.",
+              params={"min_silence": "0.5s"}))
+register(Pack("tighten-open", "Tighten the opening: trim slack off the head of the first selected "
+                              "clip.", kind="prompt",
+              prompt="Tighten the open: trim up to {frames} frames off the head of the first "
+                     "selected clip so it starts on the action. Keep everything else untouched.",
+              params={"frames": 12}))
