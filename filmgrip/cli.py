@@ -44,6 +44,16 @@ def build_parser() -> argparse.ArgumentParser:
     grab.add_argument("--no-copy", action="store_true",
                       help="print only; do not copy to the clipboard")
 
+    pack = sub.add_parser("pack", help="list / show / apply named edit recipes (packs)")
+    pack.add_argument("pack_action", nargs="?", choices=["list", "show", "apply"], default="list",
+                      help="list packs (default), show one, or apply one")
+    pack.add_argument("name", nargs="?", default="", help="pack name (for show / apply)")
+    pack.add_argument("--editor", default="resolve", help="target editor for live apply (default: resolve)")
+    pack.add_argument("--fixture", help="apply against a .otio fixture instead of a live editor")
+    pack.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
+    pack.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
+    pack.add_argument("--out", help="output path for fixture apply (default: <name>.edited.<ext>)")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
@@ -74,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_grab import cmd_grab
 
         return cmd_grab(args)
+    if args.command == "pack":
+        from .cli_pack import cmd_pack
+
+        return cmd_pack(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown
 
