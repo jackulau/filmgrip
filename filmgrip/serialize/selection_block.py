@@ -90,3 +90,32 @@ def format_selection(
             lines += ctx
     lines.append("</selected_clips>")
     return "\n".join(lines)
+
+
+def armed_preview(
+    ir: TimelineIR,
+    selected_ids: Iterable[str],
+    *,
+    confidence: str = "precise",
+    limit: int = 8,
+) -> str:
+    """A compact HUD list of the clips currently "armed" for a grab — the panel capture-preview.
+
+    react-grab's purple hover-highlight tells you *exactly what you'll grab before you commit*; a
+    Resolve script can't repaint timeline clips, so this is the honest equivalent: a terse,
+    per-clip list (name · track · in–out) the panel shows so the editor sees the capture boundary
+    rather than grabbing blind. Truncates past ``limit`` so a huge selection can't blow up the label.
+    """
+    clips = sorted(
+        (c for s in selected_ids if (c := ir.clip(s)) is not None),
+        key=lambda c: (c.track_kind, c.track_index, c.start),
+    )
+    if not clips:
+        return f"(no clips armed [{confidence}]) — select clips in Resolve and they appear here"
+    lines = [f"{len(clips)} clip(s) armed [{confidence}]:"]
+    for c in clips[:limit]:
+        lines.append(f"  • {c.name}  {track_code(c.track_kind, c.track_index)}  "
+                     f"{c.start}–{c.end}f")
+    if len(clips) > limit:
+        lines.append(f"  … +{len(clips) - limit} more")
+    return "\n".join(lines)

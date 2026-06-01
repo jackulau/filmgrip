@@ -9,6 +9,7 @@ from filmgrip.cli import main
 from filmgrip.cli_panel import default_scripts_dir, panel_source_path
 from filmgrip.ui.panel import (
     ID_APPLY,
+    ID_COPY,
     ID_DRYRUN,
     ID_OUTPUT,
     ID_PROMPT,
@@ -80,14 +81,15 @@ def test_live_controller_blocks_apply_when_nothing_selected():
     assert res.ok is False and "Select a clip" in res.text
 
 
-def test_live_controller_summarizes_selection_without_network():
-    # Build the live controller against a fake Resolve; it must summarize the selection (and NOT
-    # call the planner — that only happens on Apply).
+def test_live_controller_capture_preview_lists_clips_without_network():
+    # Build the live controller against a fake Resolve; the summary is now a capture-preview that
+    # lists each armed clip (name · track), not a bare count — and it must NOT call the planner.
     session = rc.connect(make_two_track_resolve())
     ctrl = live_controller(session)
     summary = ctrl.selection_summary()
-    assert "clip(s) selected" in summary and "reconstructed" in summary
-    assert {ID_PROMPT, ID_APPLY} <= ctrl.spec().ids()
+    assert "armed" in summary and "reconstructed" in summary   # honest capture-preview
+    assert "midshot" in summary and "v1" in summary            # the selected clip, with its track
+    assert {ID_PROMPT, ID_APPLY, ID_COPY} <= ctrl.spec().ids()
 
 
 # -- install command --------------------------------------------------------
@@ -120,3 +122,64 @@ def test_panel_install_writes_stamped_copy(tmp_path, capsys):
 
 def test_default_scripts_dir_is_resolve_edit_folder():
     assert "Scripts" in str(default_scripts_dir()) and "Edit" in str(default_scripts_dir())
+
+
+# -- D2: capture-preview HUD + Copy-context ---------------------------------
+def test_panel_spec_has_copy_context_button():
+    spec = build_panel_spec()
+    btn = spec.find(ID_COPY)
+    assert btn is not None and btn.kind == "Button" and btn.text == "Copy context"
+
+
+def test_armed_preview_is_a_per_clip_capture_list(fixtures_dir):
+    from filmgrip.core.ir import TimelineIR
+    from filmgrip.serialize.selection_block import armed_preview
+
+    ir = TimelineIR.from_otio_file(str(fixtures_dir / "cut.otio"))
+    ids = [c.id for c in ir.real_clips()[:2]]
+    preview = armed_preview(ir, ids, confidence="reconstructed")
+    assert preview.startswith("2 clip(s) armed [reconstructed]:")
+    assert "•" in preview          # bulleted per-clip lines (the capture boundary)
+    assert "f" in preview          # frame ranges shown
+
+
+def test_armed_preview_empty_is_explicit(fixtures_dir):
+    from filmgrip.core.ir import TimelineIR
+    from filmgrip.serialize.selection_block import armed_preview
+
+    ir = TimelineIR.from_otio_file(str(fixtures_dir / "cut.otio"))
+    assert "no clips armed" in armed_preview(ir, [])
+
+
+def test_on_copy_grabs_context_and_copies_to_clipboard():
+    copied = []
+    block = "<selected_clips>\n## clips:\n- [c1] x\n</selected_clips>"
+    ctrl = PanelController(
+        lambda p, d: PanelResult(True, ""),
+        grab_context=lambda: block,
+        copy_fn=lambda text: copied.append(text) or True,
+    )
+    res = ctrl.on_copy()
+    assert res.ok and "Copied" in res.text
+    assert copied == [block]
+
+
+def test_on_copy_without_clipboard_tool_shows_block():
+    block = "<selected_clips>...</selected_clips>"
+    ctrl = PanelController(lambda p, d: PanelResult(True, ""),
+                           grab_context=lambda: block, copy_fn=lambda text: False)
+    res = ctrl.on_copy()
+    assert res.ok and res.text == block   # degrades to showing the block for manual copy
+
+
+def test_on_copy_without_grab_context_is_graceful():
+    res = PanelController(lambda p, d: PanelResult(True, "")).on_copy()
+    assert res.ok is False and "unavailable" in res.text
+
+
+def test_on_copy_grab_exception_does_not_crash():
+    def boom():
+        raise RuntimeError("snapshot failed")
+
+    res = PanelController(lambda p, d: PanelResult(True, ""), grab_context=boom).on_copy()
+    assert res.ok is False and "snapshot failed" in res.text
