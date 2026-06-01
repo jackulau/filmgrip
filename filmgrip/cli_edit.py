@@ -130,11 +130,17 @@ def _run_live(args) -> int:
                   "film-grip reconstructs your selection from the current clip + media-pool "
                   "selection — give it something to work from.")
             return 1
-        from .integration.mcp_host import ClaudeAgentTransport
+        from .integration.backend import UnknownBackendError, get_backend
         from .integration.repair import plan_with_repair
 
+        try:
+            transport = get_backend(getattr(args, "backend", None)).transport()
+        except UnknownBackendError as exc:
+            _emit(f"error: {exc}")
+            return 1
+
         ctx = PlannerContext(ir=ir, selection=selection, source=session, adapter=adapter)
-        result = plan_with_repair(ctx, args.prompt, ClaudeAgentTransport())
+        result = plan_with_repair(ctx, args.prompt, transport)
         _emit("# " + result.cost_line())
         if result.plan is None or not result.ok:
             _emit("plan failed:\n  " + "\n  ".join(result.errors or ["no plan produced"]))

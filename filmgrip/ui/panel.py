@@ -168,7 +168,8 @@ def live_controller(session, *, adapter=None) -> PanelController:
                                 basis=getattr(cur_sel, "basis", ""))
 
     def run_edit(prompt: str, dry_run: bool) -> PanelResult:
-        from ..integration.mcp_host import ClaudeAgentTransport, PlannerContext
+        from ..integration.backend import get_backend
+        from ..integration.mcp_host import PlannerContext
         from ..integration.repair import plan_with_repair
         from ..protocol.validate import dry_run as render_dry_run
 
@@ -179,7 +180,7 @@ def live_controller(session, *, adapter=None) -> PanelController:
             return PanelResult(False, "Select a clip in Resolve first (a timeline clip or a "
                                "media-pool item), then type your instruction.")
         ctx = PlannerContext(ir=cur_ir, selection=cur_sel, source=session, adapter=adapter)
-        result = plan_with_repair(ctx, prompt, ClaudeAgentTransport())
+        result = plan_with_repair(ctx, prompt, get_backend().transport())
         if result.plan is None or not result.ok:
             return PanelResult(False, "Could not produce a valid edit:\n  "
                                + "\n  ".join(result.errors or ["no plan"]))
