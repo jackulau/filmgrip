@@ -211,14 +211,28 @@ _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
 
 
 class ClaudeAgentTransport(Transport):
-    """The real path: drive the Claude Agent SDK with an in-process MCP server (network required)."""
+    """The real path: drive the Claude Agent SDK with an in-process MCP server (network required).
+
+    By default the planning turn runs under :func:`~filmgrip.integration.auth.subscription_billing`,
+    so it bills to the user's Claude subscription (any ``ANTHROPIC_API_KEY`` in the environment is
+    dropped for the call). Pass ``prefer_subscription=False`` (or set ``FILMGRIP_USE_SUBSCRIPTION=0``)
+    to bill an API key instead.
+    """
+
+    def __init__(self, *, prefer_subscription: Optional[bool] = None):
+        self._prefer_subscription = prefer_subscription
 
     def run(self, *, system_prompt, user_prompt, schema, ctx, session_id=None, model=None):  # pragma: no cover
         import asyncio
 
-        return asyncio.run(self._run_async(
-            system_prompt=system_prompt, user_prompt=user_prompt, schema=schema,
-            ctx=ctx, session_id=session_id, model=model))
+        from .auth import subscription_billing, use_subscription_default
+
+        prefer = (use_subscription_default() if self._prefer_subscription is None
+                  else self._prefer_subscription)
+        with subscription_billing(prefer):
+            return asyncio.run(self._run_async(
+                system_prompt=system_prompt, user_prompt=user_prompt, schema=schema,
+                ctx=ctx, session_id=session_id, model=model))
 
     async def _run_async(self, *, system_prompt, user_prompt, schema, ctx,
                          session_id=None, model=None) -> PlanResponse:  # pragma: no cover
