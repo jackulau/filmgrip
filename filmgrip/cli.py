@@ -90,9 +90,13 @@ def main(argv: list[str] | None = None) -> int:
 
         return cmd_pack(args)
     if args.command == "editors":
-        from .adapters.registry import capability_markdown
+        from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 
         print(capability_markdown())
+        print()
+        print(op_support_markdown())
+        print()
+        print(features_markdown())
         return 0
     if args.command == "sfx":
         from .audio.library import cmd_sfx

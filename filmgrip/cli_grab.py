@@ -30,7 +30,13 @@ def cmd_grab(args) -> int:
 
 
 def _grab_fixture(args) -> int:
-    ir = TimelineIR.from_otio_file(args.fixture)
+    from .cli_edit import FixtureError, load_fixture_ir
+
+    try:
+        ir = load_fixture_ir(args.fixture)
+    except FixtureError as exc:
+        _emit(f"error: {exc}")
+        return 1
     if getattr(args, "select", None):
         ids = [s.strip() for s in args.select.split(",") if s.strip()]
         unknown = [s for s in ids if ir.clip(s) is None]

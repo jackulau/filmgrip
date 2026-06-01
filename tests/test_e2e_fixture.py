@@ -30,11 +30,21 @@ def test_edit_fixture_rejects_invalid_plan(tmp_path, capsys):
     assert "UNKNOWN_CLIP" in out
 
 
-def test_edit_fixture_without_plan_explains_itself(capsys):
-    code = main(["edit", "--fixture", FIX])  # no --plan, no editor
+def test_edit_fixture_without_plan_or_prompt_explains_itself(capsys):
+    # Fixture mode now accepts EITHER --plan (replay) OR a prompt (plan against the fixture via the
+    # backend). With neither, it explains both offline routes.
+    code = main(["edit", "--fixture", FIX])  # no --plan, no prompt, no editor
     out = capsys.readouterr().out
     assert code == 3
-    assert "needs --plan" in out
+    assert "--plan" in out and "prompt" in out
+
+
+def test_edit_fixture_with_prompt_plans_through_backend(capsys):
+    # A prompt + --fixture plans with no live editor; codex surfaces its honest not-implemented.
+    code = main(["edit", "--fixture", FIX, "--backend", "codex", "make the open punchier"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "not yet implemented" in out
 
 
 def _otio_three(tmp_path):

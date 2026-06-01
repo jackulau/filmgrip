@@ -74,11 +74,16 @@ def _apply(args) -> int:
 
 
 def _apply_fixture(args, pack) -> int:
+    from .cli_edit import FixtureError, load_fixture_ir
     from .packs import PackError
     from .packs.engine import compile_pack
     from .protocol.validate import dry_run, validate
 
-    ir = TimelineIR.from_otio_file(args.fixture)
+    try:
+        ir = load_fixture_ir(args.fixture)
+    except FixtureError as exc:
+        _emit(f"error: {exc}")
+        return 1
     ids = ([s.strip() for s in args.select.split(",") if s.strip()]
            if getattr(args, "select", None) else [c.id for c in ir.real_clips()])
     try:
@@ -128,8 +133,13 @@ def _apply_prompt(args, pack) -> int:
     session = adapter = None
     if args.fixture:
         from .adapters.base import Selection
+        from .cli_edit import FixtureError, load_fixture_ir
 
-        ir = TimelineIR.from_otio_file(args.fixture)
+        try:
+            ir = load_fixture_ir(args.fixture)
+        except FixtureError as exc:
+            _emit(f"error: {exc}")
+            return 1
         ids = ([s.strip() for s in args.select.split(",") if s.strip()]
                if getattr(args, "select", None) else [c.id for c in ir.real_clips()])
         sel = Selection(ids=ids, basis="fixture")

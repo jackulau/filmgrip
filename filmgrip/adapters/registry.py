@@ -114,6 +114,19 @@ def capability_markdown() -> str:
     return "\n".join([head, *rows])
 
 
+def features_markdown() -> str:
+    """Cross-editor features that aren't per-editor — surfaced so ``film-grip editors`` is complete."""
+    return (
+        "## Cross-editor features\n"
+        "- `film-grip grab` — capture the selection as a compact <selected_clips> context block "
+        "(and copy it to the clipboard), ready to paste into any agent.\n"
+        "- `film-grip pack` — named, reusable edit recipes: deterministic packs compile straight to "
+        "a validated EditPlan; prompt packs run through the planner.\n"
+        "- planner backend — pluggable via `--backend` / `$FILMGRIP_BACKEND` (Claude is live; a "
+        "Codex/GPT seam is ready). Plans bill to your Claude subscription by default."
+    )
+
+
 def op_support_markdown() -> str:
     """Per-op support so users know which edits actually land where (live vs rebuild vs interchange)."""
     from .resolve_adapter import LIVE_EXTRA_OPS, LIVE_OPS

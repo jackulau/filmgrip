@@ -25,6 +25,25 @@ from .protocol.editplan import EditPlan
 from .protocol.validate import dry_run, validate
 
 
+class FixtureError(Exception):
+    """A --fixture path that can't be loaded — surfaced as a friendly CLI error, not a traceback."""
+
+
+def load_fixture_ir(path: str) -> TimelineIR:
+    """Load a fixture into the IR with actionable errors (missing file, unreadable format)."""
+    if not os.path.exists(path):
+        raise FixtureError(f"fixture not found: {path}")
+    if not os.path.isfile(path):
+        raise FixtureError(f"fixture is not a file: {path}")
+    try:
+        return TimelineIR.from_otio_file(path)
+    except Exception as exc:  # OTIO raises various types for bad/unsupported files
+        raise FixtureError(
+            f"could not read '{path}' as a timeline ({type(exc).__name__}: {exc}). Expected an "
+            f"OpenTimelineIO file (.otio) or a format OTIO can read."
+        ) from exc
+
+
 def _load_recorded_plan(path: str) -> EditPlan:
     with open(path, "r", encoding="utf-8") as fh:
         return EditPlan.parse(json.load(fh))
@@ -61,7 +80,11 @@ def cmd_edit(args) -> int:
 
 # --------------------------------------------------------------------------- fixture path
 def _run_fixture(args) -> int:
-    ir = TimelineIR.from_otio_file(args.fixture)
+    try:
+        ir = load_fixture_ir(args.fixture)
+    except FixtureError as exc:
+        _emit(f"error: {exc}")
+        return 1
 
     # Two ways to get a plan with no live editor: replay a recorded one (--plan), or plan against
     # the fixture via the selected backend (a prompt). The latter needs no editor — only the
