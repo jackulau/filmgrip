@@ -29,6 +29,20 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--out", help="output path for fixture/interchange apply (default: <name>.edited.<ext>)")
     edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
 
+    grab = sub.add_parser(
+        "grab",
+        help="capture the selected clips as a compact <selected_clips> context block (react-grab "
+             "flow) and copy it to the clipboard",
+    )
+    grab.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
+    grab.add_argument("--fixture", help="grab from a .otio fixture instead of a live editor")
+    grab.add_argument("--select", help="comma-separated clip IDs to grab in fixture mode "
+                                        "(default: all clips)")
+    grab.add_argument("--no-neighbors", action="store_true",
+                      help="omit the same-track neighbor context")
+    grab.add_argument("--no-copy", action="store_true",
+                      help="print only; do not copy to the clipboard")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
@@ -55,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_edit import cmd_edit
 
         return cmd_edit(args)
+    if args.command == "grab":
+        from .cli_grab import cmd_grab
+
+        return cmd_grab(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown
 
