@@ -90,6 +90,17 @@ Invalid plans aren't fatal: the **repair loop** feeds the exact validation error
 (via session resume, capped retries) so it can self-correct. Every run reports cost and the token
 savings FGX buys versus dumping the raw timeline, so you can see the price of an edit.
 
+## Billing — uses your Claude subscription
+
+film-grip plans edits through the Claude Agent SDK and, by default, bills them to your **Claude
+subscription** (Max/Pro) rather than the pay-per-token API: if an `ANTHROPIC_API_KEY` is present in
+your environment it is *dropped* for the planning call so the SDK uses your logged-in Claude Code
+OAuth session. Set `FILMGRIP_USE_SUBSCRIPTION=0` to bill an API key instead. `film-grip status`
+reports which path is active (`subscription` / `api-key` / `none`) so the cost is never a surprise.
+
+The planner is also provider-pluggable via `--backend` / `$FILMGRIP_BACKEND`: Claude is the live
+flagship today, and a Codex/GPT backend is a ready seam (`film-grip edit --backend codex …`).
+
 ## Status
 
 Early build. The core IR, protocol, serializer, validator and every non-live adapter are

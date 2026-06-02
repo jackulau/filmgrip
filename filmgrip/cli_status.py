@@ -30,7 +30,7 @@ def status_guidance(report: dict) -> list[str]:
             "film-grip edit \"add a blue marker on the selected clip\""]
 
 
-def render_status(report: dict, sfx_summary: str, editor_count: int) -> str:
+def render_status(report: dict, sfx_summary: str, editor_count: int, auth=None) -> str:
     lines = ["film-grip — status", "=" * 42]
     lines.append(f"Resolve scripting module : {_yn(report.get('module_importable'))}")
     lines.append(f"Resolve app running      : {_yn(report.get('app_running'))}")
@@ -42,6 +42,10 @@ def render_status(report: dict, sfx_summary: str, editor_count: int) -> str:
     for msg in status_guidance(report):
         lines.append(f"  → {msg}")
     lines.append("")
+    if auth is not None:
+        lines.append(f"LLM auth    : {auth.method} — {auth.detail}")
+        if auth.hint:
+            lines.append(f"  → {auth.hint}")
     lines.append(f"SFX library : {sfx_summary}")
     lines.append(f"Editors     : {editor_count} supported (run `film-grip editors` for the matrix)")
     return "\n".join(lines)
@@ -51,11 +55,12 @@ def cmd_status(args) -> int:
     from .adapters import registry
     from .adapters import resolve_client as rc
     from .audio.library import SfxLibrary
+    from .integration.auth import detect_auth
 
     report = rc.preflight()
     lib = SfxLibrary.load(getattr(args, "sfx_dir", None) or None)
     missing = f", {len(lib.missing)} missing file(s)" if lib.missing else ""
     sfx_summary = f"{lib.base} — {len(lib.entries)} effect(s){missing}"
 
-    print(render_status(report, sfx_summary, len(registry.editors())))
+    print(render_status(report, sfx_summary, len(registry.editors()), auth=detect_auth()))
     return 0  # diagnostic: always succeeds

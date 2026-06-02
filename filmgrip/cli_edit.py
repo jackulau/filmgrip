@@ -25,6 +25,25 @@ from .protocol.editplan import EditPlan
 from .protocol.validate import dry_run, validate
 
 
+class FixtureError(Exception):
+    """A --fixture path that can't be loaded — surfaced as a friendly CLI error, not a traceback."""
+
+
+def load_fixture_ir(path: str) -> TimelineIR:
+    """Load a fixture into the IR with actionable errors (missing file, unreadable format)."""
+    if not os.path.exists(path):
+        raise FixtureError(f"fixture not found: {path}")
+    if not os.path.isfile(path):
+        raise FixtureError(f"fixture is not a file: {path}")
+    try:
+        return TimelineIR.from_otio_file(path)
+    except Exception as exc:  # OTIO raises various types for bad/unsupported files
+        raise FixtureError(
+            f"could not read '{path}' as a timeline ({type(exc).__name__}: {exc}). Expected an "
+            f"OpenTimelineIO file (.otio) or a format OTIO can read."
+        ) from exc
+
+
 def _load_recorded_plan(path: str) -> EditPlan:
     with open(path, "r", encoding="utf-8") as fh:
         return EditPlan.parse(json.load(fh))
@@ -61,22 +80,30 @@ def cmd_edit(args) -> int:
 
 # --------------------------------------------------------------------------- fixture path
 def _run_fixture(args) -> int:
-    ir = TimelineIR.from_otio_file(args.fixture)
+    try:
+        ir = load_fixture_ir(args.fixture)
+    except FixtureError as exc:
+        _emit(f"error: {exc}")
+        return 1
 
-    plan: Optional[EditPlan] = None
+    # Two ways to get a plan with no live editor: replay a recorded one (--plan), or plan against
+    # the fixture via the selected backend (a prompt). The latter needs no editor — only the
+    # backend — so it's how a non-Claude backend (e.g. codex) is exercised, and how you can plan
+    # against an .otio on any machine.
     if args.plan:
-        plan = _load_recorded_plan(args.plan)
-    if plan is None:
-        _emit("error: --fixture mode needs --plan (offline) — live Claude planning requires a "
-              "running editor. Provide a recorded EditPlan with --plan.")
+        plan: Optional[EditPlan] = _load_recorded_plan(args.plan)
+    elif args.prompt:
+        plan = _plan_against_fixture(args, ir)
+        if plan is None:
+            return 1  # the planner already emitted the failure + cost line
+    else:
+        _emit("error: --fixture needs either --plan <file> (replay a recorded EditPlan) or a "
+              "prompt (plan against the fixture via the selected backend, e.g. "
+              "film-grip edit --fixture cut.otio \"tighten the open\").")
         return 3
 
-    sel = Selection(ids=_selection_from_plan(ir, plan), basis="fixture")
-    _ = PlannerContext(ir=ir, selection=sel)  # context the live path would hand to Claude
-
     if args.dry_run:
-        diff = dry_run(plan, ir)
-        _emit(diff)
+        _emit(dry_run(plan, ir))
         return 0 if validate(plan, ir).ok else 1
 
     # Applying to a fixture file = the OTIO-rebuild path (mutate OTIO, write a NEW file). Never
@@ -89,6 +116,28 @@ def _run_fixture(args) -> int:
     for w in res.warnings:
         _emit(f"  ⚠ {w}")
     return 0 if res.ok else 1
+
+
+def _plan_against_fixture(args, ir: TimelineIR) -> Optional[EditPlan]:
+    """Plan against a fixture IR via the selected backend (no live editor). None on failure."""
+    from .integration.backend import UnknownBackendError, get_backend
+    from .integration.repair import plan_with_repair
+
+    try:
+        transport = get_backend(getattr(args, "backend", None)).transport()
+    except UnknownBackendError as exc:
+        _emit(f"error: {exc}")
+        return None
+
+    # No real selection offline → default the planning context to every clip in the fixture.
+    sel = Selection(ids=[c.id for c in ir.real_clips()], basis="fixture")
+    ctx = PlannerContext(ir=ir, selection=sel)
+    result = plan_with_repair(ctx, args.prompt, transport)
+    _emit("# " + result.cost_line())
+    if result.plan is None or not result.ok:
+        _emit("plan failed:\n  " + "\n  ".join(result.errors or ["no plan produced"]))
+        return None
+    return result.plan
 
 
 # --------------------------------------------------------------------------- live path
@@ -130,11 +179,17 @@ def _run_live(args) -> int:
                   "film-grip reconstructs your selection from the current clip + media-pool "
                   "selection — give it something to work from.")
             return 1
-        from .integration.mcp_host import ClaudeAgentTransport
+        from .integration.backend import UnknownBackendError, get_backend
         from .integration.repair import plan_with_repair
 
+        try:
+            transport = get_backend(getattr(args, "backend", None)).transport()
+        except UnknownBackendError as exc:
+            _emit(f"error: {exc}")
+            return 1
+
         ctx = PlannerContext(ir=ir, selection=selection, source=session, adapter=adapter)
-        result = plan_with_repair(ctx, args.prompt, ClaudeAgentTransport())
+        result = plan_with_repair(ctx, args.prompt, transport)
         _emit("# " + result.cost_line())
         if result.plan is None or not result.ok:
             _emit("plan failed:\n  " + "\n  ".join(result.errors or ["no plan produced"]))

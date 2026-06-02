@@ -58,7 +58,7 @@ def _get_ui():
 
 
 def _build_and_run(ui, disp, controller) -> None:
-    from filmgrip.ui.panel import ID_APPLY, ID_DRYRUN, ID_OUTPUT, ID_PROMPT, ID_SELECTION
+    from filmgrip.ui.panel import ID_APPLY, ID_COPY, ID_DRYRUN, ID_OUTPUT, ID_PROMPT, ID_SELECTION
 
     win = disp.AddWindow(
         {"ID": "fg_window", "WindowTitle": "film-grip", "Geometry": [200, 200, 540, 380]},
@@ -68,8 +68,9 @@ def _build_and_run(ui, disp, controller) -> None:
             ui.TextEdit({"ID": ID_PROMPT, "PlaceholderText":
                          "e.g. add a whoosh as the title flies in, then tighten the open by 12 frames"}),
             ui.HGroup([
-                ui.Button({"ID": ID_APPLY, "Text": "Apply"}),
+                ui.Button({"ID": ID_COPY, "Text": "Copy context"}),
                 ui.Button({"ID": ID_DRYRUN, "Text": "Dry-run"}),
+                ui.Button({"ID": ID_APPLY, "Text": "Apply"}),
             ]),
             ui.Label({"ID": ID_OUTPUT, "Text": "", "WordWrap": True}),
         ]),
@@ -84,7 +85,11 @@ def _build_and_run(ui, disp, controller) -> None:
         result = controller.on_dry_run(_prompt_text()) if dry else controller.on_apply(_prompt_text())
         items[ID_OUTPUT].Text = result.text
 
+    def _copy(_ev):
+        items[ID_OUTPUT].Text = controller.on_copy().text
+
     win.On["fg_window"].Close = lambda ev: disp.ExitLoop()
+    win.On[ID_COPY].Clicked = _copy
     win.On[ID_APPLY].Clicked = lambda ev: _run(False)
     win.On[ID_DRYRUN].Clicked = lambda ev: _run(True)
 

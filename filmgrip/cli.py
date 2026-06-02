@@ -26,8 +26,34 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
     edit.add_argument("--fixture", help="run the pipeline against a .otio fixture instead of a live editor")
     edit.add_argument("--plan", help="apply a recorded EditPlan JSON instead of calling Claude (offline e2e)")
+    edit.add_argument("--backend", help="planner backend (default: claude; or $FILMGRIP_BACKEND)")
     edit.add_argument("--out", help="output path for fixture/interchange apply (default: <name>.edited.<ext>)")
     edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
+
+    grab = sub.add_parser(
+        "grab",
+        help="capture the selected clips as a compact <selected_clips> context block (react-grab "
+             "flow) and copy it to the clipboard",
+    )
+    grab.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
+    grab.add_argument("--fixture", help="grab from a .otio fixture instead of a live editor")
+    grab.add_argument("--select", help="comma-separated clip IDs to grab in fixture mode "
+                                        "(default: all clips)")
+    grab.add_argument("--no-neighbors", action="store_true",
+                      help="omit the same-track neighbor context")
+    grab.add_argument("--no-copy", action="store_true",
+                      help="print only; do not copy to the clipboard")
+
+    pack = sub.add_parser("pack", help="list / show / apply named edit recipes (packs)")
+    pack.add_argument("pack_action", nargs="?", choices=["list", "show", "apply"], default="list",
+                      help="list packs (default), show one, or apply one")
+    pack.add_argument("name", nargs="?", default="", help="pack name (for show / apply)")
+    pack.add_argument("--editor", default="resolve", help="target editor for live apply (default: resolve)")
+    pack.add_argument("--backend", help="planner backend for prompt packs (default: claude; or $FILMGRIP_BACKEND)")
+    pack.add_argument("--fixture", help="apply against a .otio fixture instead of a live editor")
+    pack.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
+    pack.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
+    pack.add_argument("--out", help="output path for fixture apply (default: <name>.edited.<ext>)")
 
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
@@ -55,10 +81,22 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_edit import cmd_edit
 
         return cmd_edit(args)
+    if args.command == "grab":
+        from .cli_grab import cmd_grab
+
+        return cmd_grab(args)
+    if args.command == "pack":
+        from .cli_pack import cmd_pack
+
+        return cmd_pack(args)
     if args.command == "editors":
-        from .adapters.registry import capability_markdown
+        from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 
         print(capability_markdown())
+        print()
+        print(op_support_markdown())
+        print()
+        print(features_markdown())
         return 0
     if args.command == "sfx":
         from .audio.library import cmd_sfx

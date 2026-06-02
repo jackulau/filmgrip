@@ -23,6 +23,7 @@ ID_SELECTION = "fg_selection"
 ID_PROMPT = "fg_prompt"
 ID_APPLY = "fg_apply"
 ID_DRYRUN = "fg_dryrun"
+ID_COPY = "fg_copy"
 ID_OUTPUT = "fg_output"
 
 
@@ -63,8 +64,9 @@ def build_panel_spec(selection_summary: str = "(no selection)") -> PanelSpec:
                              props={"PlaceholderText": "e.g. add a whoosh as the title flies in, "
                                                        "then tighten the open by 12 frames"}),
                       Widget("HGroup", children=[
-                          Widget("Button", id=ID_APPLY, text="Apply"),
+                          Widget("Button", id=ID_COPY, text="Copy context"),
                           Widget("Button", id=ID_DRYRUN, text="Dry-run"),
+                          Widget("Button", id=ID_APPLY, text="Apply"),
                       ]),
                       Widget("Label", id=ID_OUTPUT, text="", props={"WordWrap": True}),
                   ])])
@@ -77,17 +79,34 @@ class PanelResult:
     text: str
 
 
-# run_edit(prompt, dry_run) -> PanelResult : the one seam the panel needs. The live factory below
-# wires it to the real pipeline; tests inject a fake.
+# run_edit(prompt, dry_run) -> PanelResult : the edit seam. grab_context() -> str : the capture
+# seam (the <selected_clips> block for Copy-context). The live factory below wires both to the real
+# pipeline; tests inject fakes.
 RunEdit = Callable[[str, bool], PanelResult]
+GrabContext = Callable[[], str]
+
+
+def _default_copy(text: str) -> bool:
+    from ..clipboard import copy
+
+    return copy(text)
 
 
 class PanelController:
-    """Panel behaviour over a single injectable ``run_edit`` seam — fully testable without Resolve."""
+    """Panel behaviour over injectable seams — fully testable without Resolve, SDK or network."""
 
-    def __init__(self, run_edit: RunEdit, selection_summary: str = "(no selection)"):
+    def __init__(
+        self,
+        run_edit: RunEdit,
+        selection_summary: str = "(no selection)",
+        *,
+        grab_context: Optional[GrabContext] = None,
+        copy_fn: Callable[[str], bool] = _default_copy,
+    ):
         self._run_edit = run_edit
         self._summary = selection_summary
+        self._grab_context = grab_context
+        self._copy_fn = copy_fn
 
     def selection_summary(self) -> str:
         return self._summary
@@ -100,6 +119,20 @@ class PanelController:
 
     def on_dry_run(self, prompt: str) -> PanelResult:
         return self._submit(prompt, dry_run=True)
+
+    def on_copy(self) -> PanelResult:
+        """Copy the full ``<selected_clips>`` block to the clipboard (the panel's react-grab path)."""
+        if self._grab_context is None:
+            return PanelResult(False, "Copy unavailable — no selection context is wired.")
+        try:
+            block = self._grab_context()
+        except Exception as exc:  # capture must never crash the panel
+            return PanelResult(False, f"error: {exc}")
+        if self._copy_fn(block):
+            return PanelResult(True, "Copied selection context to the clipboard — paste it into "
+                                     "your agent (Claude Code / Codex / Cursor).")
+        # No clipboard tool available: show the block so the user can copy it from the output area.
+        return PanelResult(True, block)
 
     def _submit(self, prompt: str, *, dry_run: bool) -> PanelResult:
         if not (prompt or "").strip():
@@ -117,15 +150,26 @@ def live_controller(session, *, adapter=None) -> PanelController:
     translator. The planner/transport are only imported when an edit is actually run.
     """
     from ..adapters.resolve_adapter import ResolveAdapter
+    from ..serialize.selection_block import armed_preview, format_selection
 
     adapter = adapter or ResolveAdapter()
     ir = adapter.snapshot(session)
     selection = adapter.get_selection(session, ir)
-    summary = (f"{len(selection.ids)} clip(s) selected "
-               f"[{getattr(selection, 'confidence', 'precise')}]")
+    summary = armed_preview(ir, selection.ids,
+                            confidence=getattr(selection, "confidence", "precise"))
+
+    def grab_context() -> str:
+        # Re-snapshot so the copied block matches the CURRENT timeline + selection, not the
+        # snapshot taken when the panel opened.
+        cur_ir = adapter.snapshot(session)
+        cur_sel = adapter.get_selection(session, cur_ir)
+        return format_selection(cur_ir, cur_sel.ids,
+                                confidence=getattr(cur_sel, "confidence", "precise"),
+                                basis=getattr(cur_sel, "basis", ""))
 
     def run_edit(prompt: str, dry_run: bool) -> PanelResult:
-        from ..integration.mcp_host import ClaudeAgentTransport, PlannerContext
+        from ..integration.backend import get_backend
+        from ..integration.mcp_host import PlannerContext
         from ..integration.repair import plan_with_repair
         from ..protocol.validate import dry_run as render_dry_run
 
@@ -136,7 +180,7 @@ def live_controller(session, *, adapter=None) -> PanelController:
             return PanelResult(False, "Select a clip in Resolve first (a timeline clip or a "
                                "media-pool item), then type your instruction.")
         ctx = PlannerContext(ir=cur_ir, selection=cur_sel, source=session, adapter=adapter)
-        result = plan_with_repair(ctx, prompt, ClaudeAgentTransport())
+        result = plan_with_repair(ctx, prompt, get_backend().transport())
         if result.plan is None or not result.ok:
             return PanelResult(False, "Could not produce a valid edit:\n  "
                                + "\n  ".join(result.errors or ["no plan"]))
@@ -148,4 +192,4 @@ def live_controller(session, *, adapter=None) -> PanelController:
             body += "\n  ⚠ " + "\n  ⚠ ".join(res.warnings)
         return PanelResult(res.ok, body)
 
-    return PanelController(run_edit, selection_summary=summary)
+    return PanelController(run_edit, selection_summary=summary, grab_context=grab_context)
