@@ -72,6 +72,26 @@ def _emit(text: str) -> None:
     print(text)
 
 
+def _emit_apply_result(res) -> int:
+    """Render an ApplyResult honestly and map it to the documented exit code.
+
+    Always shows what DID apply (``diff``), then ops that couldn't (``✗`` unsupported), then lossy
+    annotations (``⚠`` warnings), then hard failures. Exit: 0 ok · 3 some op unsupported · 1 other.
+    A partial apply (some ops landed, some unsupported) is a non-zero exit — film-grip never claims
+    success for an edit it didn't fully perform.
+    """
+    _emit(res.diff)
+    for u in res.unsupported:
+        _emit(f"  ✗ {u}")
+    for w in res.warnings:
+        _emit(f"  ⚠ {w}")
+    if res.errors:
+        _emit("apply failed:\n  " + "\n  ".join(res.errors))
+    if res.ok:
+        return 0
+    return 3 if res.unsupported and not res.errors else 1
+
+
 def cmd_edit(args) -> int:
     if args.fixture:
         return _run_fixture(args)
@@ -112,10 +132,7 @@ def _run_fixture(args) -> int:
 
     out = args.out or _derived_out(args.fixture)
     res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
-    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    return 0 if res.ok else 1
+    return _emit_apply_result(res)
 
 
 def _plan_against_fixture(args, ir: TimelineIR) -> Optional[EditPlan]:
@@ -201,13 +218,7 @@ def _run_live(args) -> int:
         return 0 if validate(plan, ir).ok else 1
 
     res = adapter.apply(plan, session)
-    _emit(res.diff)
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    if not res.ok:
-        _emit("apply failed:\n  " + "\n  ".join(res.errors))
-        return 1
-    return 0
+    return _emit_apply_result(res)
 
 
 def _preflight_message(report: dict) -> str:

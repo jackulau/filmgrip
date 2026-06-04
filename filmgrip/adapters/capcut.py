@@ -147,10 +147,11 @@ class CapcutAdapter(GrabAdapter):
                 seg_for[clip.id] = seg
 
         applied: list[str] = []
-        warnings: list[str] = []
+        unsupported: list[str] = []
         for op in plan.ops:
             if op.op not in SUPPORTED_OPS:
-                warnings.append(f"op '{op.op}' not represented in CapCut draft rewrite")
+                unsupported.append(f"op '{op.op}' is not representable in a CapCut draft rewrite "
+                                   f"(CapCut offline supports trim/move/delete only)")
                 continue
             clip = ir.clip(op.clip_id)
             seg = seg_for[op.clip_id]
@@ -176,9 +177,13 @@ class CapcutAdapter(GrabAdapter):
                         tr["segments"].remove(seg)
                 applied.append(f"delete {clip.name}")
 
+        if not applied:
+            # Nothing the user asked for is representable — don't rewrite the draft and imply work.
+            return ApplyResult(ok=False, unsupported=unsupported,
+                               diff="  (no CapCut-applicable ops)")
         out = self._resolve_path(out_path) if out_path else self._resolve_path(source)
         with open(out, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
-        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no CapCut-applicable ops)"
+        diff = "\n".join(f"  ✓ {d}" for d in applied)
         diff += f"\n  → wrote CapCut draft to {out}"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff, unsupported=unsupported)

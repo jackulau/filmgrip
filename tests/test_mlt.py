@@ -60,14 +60,17 @@ def test_delete_ripple_removes_clip(fixtures_dir, tmp_path):
     assert [c.name for c in ir2.real_clips()] == ["alpha", "charlie"]
 
 
-def test_unsupported_op_warns(fixtures_dir, tmp_path):
+def test_unsupported_op_is_rejected_not_faked(fixtures_dir, tmp_path):
     a = MltAdapter()
     src = str(fixtures_dir / "sample.mlt")
     ir = a.snapshot(src)
+    out = tmp_path / "o.mlt"
     plan = EditPlan.parse({"ops": [{"op": "add_marker", "clip_id": _id(ir, "alpha"), "frame": 0}]})
-    res = a.apply(plan, src, out_path=str(tmp_path / "o.mlt"))
-    assert res.ok
-    assert any("add_marker" in w for w in res.warnings)
+    res = a.apply(plan, src, out_path=str(out))
+    # add_marker is not representable in MLT — report it unsupported (ok=False), don't fake success.
+    assert res.ok is False
+    assert any("add_marker" in u for u in res.unsupported)
+    assert not out.exists()
 
 
 def test_capabilities():

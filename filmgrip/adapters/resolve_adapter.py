@@ -280,13 +280,16 @@ class ResolveAdapter(GrabAdapter):
             applied += res.applied
             warnings += res.warnings
 
-        if not_applicable:
-            warnings.append(
-                f"{len(not_applicable)} op(s) not applied — no live or rebuild path in Resolve: "
-                f"{sorted(set(not_applicable))} (e.g. add_transition is best done in the editor)"
-            )
+        unsupported = [
+            f"op '{name}' has no live or rebuild path in Resolve — do it in the editor "
+            f"(e.g. add a transition on the Edit page)"
+            for name in sorted(set(not_applicable))
+        ]
         diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no live ops)"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        # ok=False if any requested op had no path — never report success for an edit we didn't make,
+        # even when other ops in the same plan applied live.
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff,
+                           warnings=warnings, unsupported=unsupported)
 
     # -- rebuild apply path -----------------------------------------------------
     def _apply_via_rebuild(self, plan: EditPlan, session: ResolveSession,
@@ -316,7 +319,7 @@ class ResolveAdapter(GrabAdapter):
                 ok=False,
                 errors=[f"rebuild re-validation failed (timeline intact): {e}" for e in vres.errors])
 
-        applied, warnings = OtioMutator(rebuild_ir).apply(plan)
+        applied, unsupported = OtioMutator(rebuild_ir).apply(plan)
         rebuild_ir.to_otio_file(import_path)
         try:
             import_timeline_from_file(session, import_path)
@@ -324,12 +327,15 @@ class ResolveAdapter(GrabAdapter):
             return ApplyResult(ok=False, applied=applied,
                                errors=[f"rebuild import failed (original timeline intact): {exc}"])
 
-        warnings = remap_warnings + warnings + [
+        warnings = remap_warnings + [
             "applied via OTIO rebuild — created a NEW timeline; color grades, Fusion comps and some "
             "transitions are NOT carried over (lossy). Your original timeline is left intact."
         ]
         diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no rebuild ops)"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        # The structural sub-plan is pre-filtered to REBUILD_OPS, so `unsupported` is normally empty;
+        # propagate it (ok=False) if a future op ever slips through unhandled.
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff,
+                           warnings=warnings, unsupported=unsupported)
 
     @staticmethod
     def _reresolve_plan(plan: EditPlan, native_ir: TimelineIR,

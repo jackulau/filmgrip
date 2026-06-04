@@ -68,15 +68,21 @@ class OtioMutator:
         self.rate = ir.rate
 
     def apply(self, plan: EditPlan) -> tuple[list[str], list[str]]:
+        """Apply REBUILD_OPS in place; return ``(applied, unsupported)``.
+
+        ``unsupported`` holds a reason per requested op this rebuild path can't represent — the caller
+        turns those into ``ApplyResult.unsupported`` (ok=False), never a soft warning, so a dropped op
+        is never reported as success.
+        """
         applied: list[str] = []
-        warnings: list[str] = []
+        unsupported: list[str] = []
         for op in plan.ops:
             if op.op not in REBUILD_OPS:
-                warnings.append(f"op '{op.op}' not applied in interchange rebuild "
-                                f"(needs a live editor or repositioning support)")
+                unsupported.append(f"op '{op.op}' has no interchange/rebuild path — do it in a live "
+                                   f"editor (e.g. add a transition in the NLE)")
                 continue
             applied.append(getattr(self, f"_{op.op}")(op))
-        return applied, warnings
+        return applied, unsupported
 
     def _clip_and_item(self, op):
         clip = self.ir.clip(op.clip_id)
@@ -280,22 +286,29 @@ class InterchangeAdapter(GrabAdapter):
         if not res.ok:
             return ApplyResult(ok=False, errors=[str(e) for e in res.errors])
 
-        applied, warnings = OtioMutator(ir).apply(plan)
+        applied, unsupported = OtioMutator(ir).apply(plan)
 
         out = out_path or source
         fmt = self._fmt_for(out, out_format)
-        warnings.extend(self._lossy_warnings(ir, fmt))
+        warnings = self._lossy_warnings(ir, fmt)
+        if not applied:
+            # Every requested op was unrepresentable — don't rewrite an identical file and imply work.
+            return ApplyResult(ok=False, unsupported=unsupported, warnings=warnings,
+                               diff="  (no applicable ops)")
         try:
             otio.adapters.write_to_file(ir.timeline, out, adapter_name=fmt)
         except Exception as exc:
             # The target format genuinely can't represent this timeline (e.g. EDL is single-track
             # cuts-only). Refuse cleanly rather than writing a corrupt/garbage file.
-            return ApplyResult(ok=False, applied=applied, warnings=warnings,
+            return ApplyResult(ok=False, applied=applied, warnings=warnings, unsupported=unsupported,
                                errors=[f"cannot write {fmt}: {exc}"])
 
-        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no rebuild ops)"
+        diff = "\n".join(f"  ✓ {d}" for d in applied)
         diff += f"\n  → wrote {fmt} to {out}"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        # ok only when EVERY requested op landed — a partial apply (some ops unsupported) is ok=False
+        # with the file holding the ops that did apply.
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff,
+                           warnings=warnings, unsupported=unsupported)
 
     @staticmethod
     def _lossy_warnings(ir: TimelineIR, fmt: str) -> list[str]:
