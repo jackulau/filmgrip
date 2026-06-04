@@ -19,6 +19,39 @@ def _id(ir, name):
     return next(c for c in ir.real_clips() if c.name == name).id
 
 
+def test_split_partitions_markers_by_half_not_duplicates(tmp_path):
+    # _split used item.deepcopy() for the tail, copying ALL markers onto BOTH halves. Each marker must
+    # land only on the half whose source range contains it — total markers conserved, none duplicated.
+    from filmgrip.adapters.interchange import OtioMutator
+    from filmgrip.core.ir import TimelineIR
+
+    def rt(f):
+        return otio.opentime.RationalTime(f, 24.0)
+
+    tl = otio.schema.Timeline(name="t")
+    tl.global_start_time = rt(0)
+    v = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+    clip = otio.schema.Clip(name="A", media_reference=otio.schema.ExternalReference(target_url="/m/a.mov"),
+                            source_range=otio.opentime.TimeRange(rt(0), rt(48)))
+    clip.markers.append(otio.schema.Marker(name="head", marked_range=otio.opentime.TimeRange(rt(5), rt(1))))
+    clip.markers.append(otio.schema.Marker(name="tail", marked_range=otio.opentime.TimeRange(rt(30), rt(1))))
+    v.append(clip)
+    tl.tracks.append(v)
+    path = str(tmp_path / "t.otio")
+    otio.adapters.write_to_file(tl, path)
+
+    ir = TimelineIR.from_otio_file(path)
+    cid = ir.real_clips()[0].id
+    applied, unsupported = OtioMutator(ir).apply(
+        EditPlan.parse({"ops": [{"op": "split", "clip_id": cid, "at_frame": 24}]}))
+    assert not unsupported and len(applied) == 1
+    clips = [ch for tr in ir.timeline.tracks for ch in tr if isinstance(ch, otio.schema.Clip)]
+    assert len(clips) == 2
+    assert sum(len(c.markers) for c in clips) == 2  # conserved, not doubled to 4
+    names_by_half = [[m.name for m in c.markers] for c in clips]
+    assert ["head"] in names_by_half and ["tail"] in names_by_half
+
+
 def test_reads_fcpxml_and_edl_into_ir(fixtures_dir):
     a = InterchangeAdapter()
     ir_fcp = a.snapshot(str(fixtures_dir / "sample.fcpxml"))

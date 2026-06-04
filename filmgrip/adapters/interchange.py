@@ -220,10 +220,18 @@ class OtioMutator:
         idx = list(track).index(item)
         off = op.at_frame - clip.start
         sr = item.source_range
+        split_src = sr.start_time + _rt(off, self.rate)   # source-time boundary between the halves
         item.source_range = otio.opentime.TimeRange(sr.start_time, _rt(off, self.rate))
         tail = item.deepcopy()
-        tail.source_range = otio.opentime.TimeRange(
-            sr.start_time + _rt(off, self.rate), _rt(clip.duration - off, self.rate))
+        tail.source_range = otio.opentime.TimeRange(split_src, _rt(clip.duration - off, self.rate))
+        # deepcopy duplicated the clip's markers onto BOTH halves. Keep each marker only on the half
+        # whose source range actually contains it (markers are stored in source coords), so a marker
+        # from the first half doesn't reappear in the tail.
+        boundary = split_src.to_frames()
+        item.markers[:] = [m for m in item.markers
+                           if m.marked_range.start_time.to_frames() < boundary]
+        tail.markers[:] = [m for m in tail.markers
+                           if m.marked_range.start_time.to_frames() >= boundary]
         track.insert(idx + 1, tail)
         return f"split {clip.name} @ {op.at_frame}"
 
