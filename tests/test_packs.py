@@ -24,7 +24,11 @@ def _all_ids(ir):
 # --- registry ----------------------------------------------------------------
 def test_builtins_registered():
     names = {p.name for p in all_packs()}
-    assert {"marker-pass", "punch-up", "dissolves"} <= names
+    assert "marker-pass" in names
+    # punch-up / dissolves were removed — they emitted add_transition, which no adapter can apply,
+    # so they reported success while changing nothing. A deterministic pack must only emit applicable
+    # ops (see test_packs_applicable.py).
+    assert "punch-up" not in names and "dissolves" not in names
 
 
 def test_get_unknown_pack_raises():
@@ -47,20 +51,6 @@ def test_marker_pass_respects_param_override(cut):
     assert validate(plan, cut).ok
 
 
-def test_punch_up_top_and_tails_with_fades(cut):
-    plan = compile_pack(get_pack("punch-up"), cut, _all_ids(cut))
-    types = {op.type for op in plan.ops}
-    assert types == {"fade_in", "fade_out"}
-    assert validate(plan, cut).ok  # fades need no neighbor → always valid
-
-
-def test_dissolves_only_where_a_neighbor_exists(cut):
-    plan = compile_pack(get_pack("dissolves"), cut, _all_ids(cut))
-    assert plan.ops, "cut.otio has clips with following neighbors"
-    assert all(op.op == "add_transition" and op.type == "cross_dissolve" for op in plan.ops)
-    assert validate(plan, cut).ok  # the recipe checked adjacency, so validation can't reject it
-
-
 def test_compile_prompt_pack_is_rejected(cut):
     p = Pack("p", "a prompt pack", kind="prompt", prompt="do the thing")
     with pytest.raises(PackError):
@@ -78,14 +68,14 @@ def test_cli_pack_list(capsys):
     code = main(["pack", "list"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "marker-pass" in out and "punch-up" in out and "dissolves" in out
+    assert "marker-pass" in out
 
 
 def test_cli_pack_show(capsys):
-    code = main(["pack", "show", "punch-up"])
+    code = main(["pack", "show", "marker-pass"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "punch-up" in out and "fade" in out
+    assert "marker-pass" in out and "marker" in out
 
 
 def test_cli_pack_apply_marker_pass_dry_run(capsys):
