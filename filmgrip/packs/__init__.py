@@ -1,6 +1,6 @@
 """Edit packs — named, reusable edit recipes.
 
-A *pack* turns a one-word intent ("punch-up", "marker-pass") into edits, so common operations don't
+A *pack* turns a one-word intent ("marker-pass") into edits, so common operations don't
 need a fresh natural-language prompt every time. Two kinds:
 
 * **deterministic** — an IR-aware recipe that compiles straight to a typed

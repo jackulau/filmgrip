@@ -29,18 +29,31 @@ class FixtureError(Exception):
     """A --fixture path that can't be loaded — surfaced as a friendly CLI error, not a traceback."""
 
 
-def load_fixture_ir(path: str) -> TimelineIR:
-    """Load a fixture into the IR with actionable errors (missing file, unreadable format)."""
+def _adapter_for_fixture(path: str):
+    """Pick the adapter for a fixture by file extension (the registry's job), defaulting to the OTIO
+    interchange adapter. This is what lets `--fixture x.mlt|x.wfp|capcut.json` drive the CapCut /
+    Filmora / MLT adapters the `film-grip editors` matrix advertises — not just OTIO files."""
+    from .adapters import registry
+    from .adapters.interchange import InterchangeAdapter
+
+    ext = os.path.splitext(path)[1].lower()
+    entry = registry.for_extension(ext)
+    return entry.adapter if entry is not None else InterchangeAdapter()
+
+
+def load_fixture_ir(path: str, adapter=None) -> TimelineIR:
+    """Load a fixture into the IR via the right per-extension adapter, with actionable errors."""
     if not os.path.exists(path):
         raise FixtureError(f"fixture not found: {path}")
     if not os.path.isfile(path):
         raise FixtureError(f"fixture is not a file: {path}")
+    adapter = adapter or _adapter_for_fixture(path)
     try:
-        return TimelineIR.from_otio_file(path)
-    except Exception as exc:  # OTIO raises various types for bad/unsupported files
+        return adapter.snapshot(path)
+    except Exception as exc:  # adapters raise various types for bad/unsupported files
         raise FixtureError(
-            f"could not read '{path}' as a timeline ({type(exc).__name__}: {exc}). Expected an "
-            f"OpenTimelineIO file (.otio) or a format OTIO can read."
+            f"could not read '{path}' via the {adapter.name} adapter ({type(exc).__name__}: {exc}). "
+            f"Expected a file the {adapter.name} adapter understands."
         ) from exc
 
 
@@ -72,6 +85,26 @@ def _emit(text: str) -> None:
     print(text)
 
 
+def _emit_apply_result(res) -> int:
+    """Render an ApplyResult honestly and map it to the documented exit code.
+
+    Always shows what DID apply (``diff``), then ops that couldn't (``✗`` unsupported), then lossy
+    annotations (``⚠`` warnings), then hard failures. Exit: 0 ok · 3 some op unsupported · 1 other.
+    A partial apply (some ops landed, some unsupported) is a non-zero exit — film-grip never claims
+    success for an edit it didn't fully perform.
+    """
+    _emit(res.diff)
+    for u in res.unsupported:
+        _emit(f"  ✗ {u}")
+    for w in res.warnings:
+        _emit(f"  ⚠ {w}")
+    if res.errors:
+        _emit("apply failed:\n  " + "\n  ".join(res.errors))
+    if res.ok:
+        return 0
+    return 3 if res.unsupported and not res.errors else 1
+
+
 def cmd_edit(args) -> int:
     if args.fixture:
         return _run_fixture(args)
@@ -80,8 +113,9 @@ def cmd_edit(args) -> int:
 
 # --------------------------------------------------------------------------- fixture path
 def _run_fixture(args) -> int:
+    adapter = _adapter_for_fixture(args.fixture)
     try:
-        ir = load_fixture_ir(args.fixture)
+        ir = load_fixture_ir(args.fixture, adapter)
     except FixtureError as exc:
         _emit(f"error: {exc}")
         return 1
@@ -106,16 +140,18 @@ def _run_fixture(args) -> int:
         _emit(dry_run(plan, ir))
         return 0 if validate(plan, ir).ok else 1
 
-    # Applying to a fixture file = the OTIO-rebuild path (mutate OTIO, write a NEW file). Never
-    # overwrite the source in place — default to a derived path so the input is preserved.
-    from .adapters.interchange import InterchangeAdapter
+    # Apply via the extension's adapter (OTIO rebuild for interchange/.otio; native rewrite for
+    # CapCut/MLT; Filmora honestly refuses). Never overwrite the source — write a derived path.
+    from .adapters.base import NotSupportedError
 
     out = args.out or _derived_out(args.fixture)
-    res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
-    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    return 0 if res.ok else 1
+    try:
+        res = adapter.apply(plan, args.fixture, out_path=out)
+    except NotSupportedError as exc:
+        # e.g. Filmora is read-only — say so plainly and use the "unsupported" exit code.
+        _emit(f"error: {exc}")
+        return 3
+    return _emit_apply_result(res)
 
 
 def _plan_against_fixture(args, ir: TimelineIR) -> Optional[EditPlan]:
@@ -201,13 +237,7 @@ def _run_live(args) -> int:
         return 0 if validate(plan, ir).ok else 1
 
     res = adapter.apply(plan, session)
-    _emit(res.diff)
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    if not res.ok:
-        _emit("apply failed:\n  " + "\n  ".join(res.errors))
-        return 1
-    return 0
+    return _emit_apply_result(res)
 
 
 def _preflight_message(report: dict) -> str:

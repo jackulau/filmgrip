@@ -255,6 +255,17 @@ class ClaudeAgentTransport(Transport):
         async for msg in query(prompt=user_prompt, options=options):
             if isinstance(msg, ResultMessage):
                 final = msg
+        return self._to_plan_response(final)
+
+    @staticmethod
+    def _to_plan_response(final) -> PlanResponse:
+        """Map the SDK's final ``ResultMessage`` (or ``None``) to a transport-neutral PlanResponse.
+
+        Pure — no SDK import, no network — so the field/subtype mapping that "Claude is live" rests on
+        is unit-testable (the live ``_run_async`` is the only un-coverable glue). ``subtype`` falls back
+        to ``error``/``success`` from ``is_error`` when the SDK omits it; ``None`` totals coerce to 0/{}/
+        [] so a caller never sees a stray ``None``.
+        """
         if final is None:
             return PlanResponse(subtype="error", errors=["no ResultMessage from SDK"])
         return PlanResponse(

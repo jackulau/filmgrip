@@ -110,12 +110,13 @@ def test_rename_track_unknown_track_rejected():
     assert not res.ok and V.TRACK_NOT_FOUND in res.codes()
 
 
-def test_interchange_warns_organize_ops_not_applied(fixtures_dir, tmp_path):
-    # Organize ops have no meaning in a flat interchange file — must warn, not crash.
+def test_interchange_rejects_organize_ops_not_faked(fixtures_dir, tmp_path):
+    # Organize ops have no meaning in a flat interchange file — must be reported unsupported
+    # (ok=False), never ok=True with a warning (which would fake a success that didn't happen).
     from filmgrip.adapters.interchange import InterchangeAdapter
     src = str(fixtures_dir / "sample.fcpxml")
     a = InterchangeAdapter()
     plan = EditPlan.parse({"ops": [{"op": "create_bin", "name": "selects"}]})
     res = a.apply(plan, src, out_path=str(tmp_path / "o.fcpxml"))
-    assert res.ok
-    assert any("create_bin" in w and "not applied" in w for w in res.warnings)
+    assert res.ok is False
+    assert any("create_bin" in u for u in res.unsupported)

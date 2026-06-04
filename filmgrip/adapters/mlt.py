@@ -144,10 +144,11 @@ class MltAdapter(GrabAdapter):
                 entry_for[clip.id] = (pl, entry)
 
         applied: list[str] = []
-        warnings: list[str] = []
+        unsupported: list[str] = []
         for op in plan.ops:
             if op.op not in SUPPORTED_OPS:
-                warnings.append(f"op '{op.op}' not represented in MLT rewrite (kept project as-is)")
+                unsupported.append(f"op '{op.op}' is not representable in MLT (Kdenlive/Shotcut) "
+                                   f"rewrite — supports move/trim/delete only")
                 continue
             clip = ir.clip(op.clip_id)
             pl, entry = entry_for[op.clip_id]
@@ -159,11 +160,15 @@ class MltAdapter(GrabAdapter):
                     entry.set("in", str(cin + op.delta))
                 applied.append(f"trim {clip.name} {op.edge} {op.delta:+d}")
             elif op.op == "delete":
+                idx = list(pl).index(entry)
                 pl.remove(entry)
                 if not op.ripple:
-                    blank = etree.SubElement(pl, "blank")
+                    # Leave the gap exactly where the clip was, so downstream clips keep their
+                    # positions. (SubElement appends to the END — wrong; build a standalone <blank>
+                    # and insert it at the removed entry's original index.)
+                    blank = etree.Element("blank")
                     blank.set("length", str(clip.duration))
-                    pl.insert(list(pl).index(blank), blank)  # keep order best-effort
+                    pl.insert(idx, blank)
                 applied.append(f"delete {clip.name}{' (ripple)' if op.ripple else ''}")
             elif op.op == "move":
                 pl.remove(entry)
@@ -179,8 +184,12 @@ class MltAdapter(GrabAdapter):
                     pl.insert(list(pl).index(ref), entry)
                 applied.append(f"move {clip.name} -> ~{op.to_start}")
 
+        if not applied:
+            # Nothing the user asked for is representable — don't rewrite the project and imply work.
+            return ApplyResult(ok=False, unsupported=unsupported,
+                               diff="  (no MLT-applicable ops)")
         out = out_path or source
         tree.write(out, xml_declaration=True, encoding="utf-8", pretty_print=True)
-        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no MLT-applicable ops)"
+        diff = "\n".join(f"  ✓ {d}" for d in applied)
         diff += f"\n  → wrote MLT to {out}"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff, unsupported=unsupported)

@@ -77,6 +77,11 @@ class ApplyResult:
     applied: list[str] = field(default_factory=list)   # human-readable per-op descriptions
     diff: str = ""
     errors: list[str] = field(default_factory=list)
+    # Ops the user requested that this adapter/path genuinely cannot apply (e.g. add_transition in
+    # Resolve, add_marker in CapCut). These make ok=False — film-grip never reports success for an
+    # edit it didn't perform. Distinct from `warnings`, which annotate ops that DID apply (lossy
+    # round-trip, a bin that fell back to root). The CLI maps a non-empty `unsupported` to exit 3.
+    unsupported: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 

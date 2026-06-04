@@ -127,26 +127,50 @@ def features_markdown() -> str:
     )
 
 
-def op_support_markdown() -> str:
-    """Per-op support so users know which edits actually land where (live vs rebuild vs interchange)."""
+# Display order for the op table (grouped edit → annotate → audio/organize). Order only — the column
+# VALUES are derived from the op sets in op_support_row(), and this list is asserted complete against
+# the schema (filmgrip.protocol.editplan.all_op_names) by the honesty gate, so no op can be silently
+# dropped or mislabelled.
+_OP_DISPLAY_ORDER = (
+    "trim", "move", "split", "insert", "ripple", "delete",
+    "add_marker", "set_property", "add_transition",
+    "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
+)
+
+# Cosmetic suffixes only — the yes/no/rebuild/n-a classification itself is derived, never hand-set.
+_INTER_NOTE = {"set_property": " (metadata)", "add_transition": " (do in editor)"}
+
+
+def op_support_row(op: str) -> tuple[str, str, str]:
+    """(Resolve-live, Resolve-rebuild, interchange) support for an op — DERIVED from the real op sets
+    so the published matrix can never claim a capability the adapters don't actually have."""
+    from .interchange import REBUILD_OPS
     from .resolve_adapter import LIVE_EXTRA_OPS, LIVE_OPS
 
+    if op in LIVE_OPS or op in LIVE_EXTRA_OPS:
+        live = "yes"
+    elif op in REBUILD_OPS:
+        live = "rebuild"            # no in-place live path, but applies live via the OTIO rebuild
+    else:
+        live = "no"
+    if op in REBUILD_OPS:
+        rebuild = "yes"
+    elif op in LIVE_EXTRA_OPS:
+        rebuild = "n/a"             # live-only structural add (track/bin/audio); rebuild doesn't apply
+    else:
+        rebuild = "no"
+    inter = "yes" if op in REBUILD_OPS else "no"
+    return live, rebuild, inter
+
+
+def op_support_markdown() -> str:
+    """Per-op support so users know which edits actually land where (live vs rebuild vs interchange)."""
     head = ("| Op | Resolve (live) | Resolve (rebuild) | Interchange file |\n"
             "|---|---|---|---|")
-    notes = {
-        "trim": ("rebuild", "yes", "yes"), "move": ("rebuild", "yes", "yes"),
-        "split": ("rebuild", "yes", "yes"), "insert": ("rebuild", "yes", "yes"),
-        "ripple": ("rebuild", "yes", "yes"), "delete": ("yes", "yes", "yes"),
-        "add_marker": ("yes", "yes", "yes"), "set_property": ("yes", "yes", "yes (metadata)"),
-        "add_transition": ("no", "no", "no (do in editor)"),
-        "import_audio": ("yes", "n/a", "no"), "add_track": ("yes", "n/a", "no"),
-        "rename_track": ("yes", "n/a", "no"), "create_bin": ("yes", "n/a", "no"),
-        "move_to_bin": ("yes", "n/a", "no"),
-    }
     rows = []
-    for op, (live, rebuild, inter) in notes.items():
-        rows.append(f"| {op} | {live} | {rebuild} | {inter} |")
-    _ = (LIVE_OPS, LIVE_EXTRA_OPS)  # keep the table honest against the live sets
+    for op in _OP_DISPLAY_ORDER:
+        live, rebuild, inter = op_support_row(op)
+        rows.append(f"| {op} | {live} | {rebuild} | {inter}{_INTER_NOTE.get(op, '')} |")
     return "\n".join([head, *rows])
 
 

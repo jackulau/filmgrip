@@ -38,7 +38,7 @@ def _show(args) -> int:
     from .packs import PackError, get_pack
 
     if not getattr(args, "name", ""):
-        _emit("error: which pack? e.g. film-grip pack show punch-up")
+        _emit("error: which pack? e.g. film-grip pack show marker-pass")
         return 1
     try:
         p = get_pack(args.name)

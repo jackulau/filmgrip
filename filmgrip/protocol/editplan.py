@@ -233,6 +233,19 @@ AnyOp = Annotated[
 ]
 
 
+def all_op_names() -> list[str]:
+    """Every op type the schema accepts, derived from the ``AnyOp`` union.
+
+    The single source of truth for "what ops exist", so a newly-added op automatically shows up in
+    the capability table and the honesty-gate tests instead of needing a hand-maintained list kept in
+    sync by discipline (exactly the drift the gate exists to prevent).
+    """
+    import typing
+
+    union = typing.get_args(AnyOp)[0]  # AnyOp == Annotated[Union[...], Field(discriminator="op")]
+    return [model.model_fields["op"].default for model in typing.get_args(union)]
+
+
 class EditPlan(BaseModel):
     """An ordered list of typed ops plus an optional one-line rationale."""
     model_config = ConfigDict(extra="forbid")

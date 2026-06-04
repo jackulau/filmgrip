@@ -68,15 +68,21 @@ class OtioMutator:
         self.rate = ir.rate
 
     def apply(self, plan: EditPlan) -> tuple[list[str], list[str]]:
+        """Apply REBUILD_OPS in place; return ``(applied, unsupported)``.
+
+        ``unsupported`` holds a reason per requested op this rebuild path can't represent — the caller
+        turns those into ``ApplyResult.unsupported`` (ok=False), never a soft warning, so a dropped op
+        is never reported as success.
+        """
         applied: list[str] = []
-        warnings: list[str] = []
+        unsupported: list[str] = []
         for op in plan.ops:
             if op.op not in REBUILD_OPS:
-                warnings.append(f"op '{op.op}' not applied in interchange rebuild "
-                                f"(needs a live editor or repositioning support)")
+                unsupported.append(f"op '{op.op}' has no interchange/rebuild path — do it in a live "
+                                   f"editor (e.g. add a transition in the NLE)")
                 continue
             applied.append(getattr(self, f"_{op.op}")(op))
-        return applied, warnings
+        return applied, unsupported
 
     def _clip_and_item(self, op):
         clip = self.ir.clip(op.clip_id)
@@ -214,10 +220,18 @@ class OtioMutator:
         idx = list(track).index(item)
         off = op.at_frame - clip.start
         sr = item.source_range
+        split_src = sr.start_time + _rt(off, self.rate)   # source-time boundary between the halves
         item.source_range = otio.opentime.TimeRange(sr.start_time, _rt(off, self.rate))
         tail = item.deepcopy()
-        tail.source_range = otio.opentime.TimeRange(
-            sr.start_time + _rt(off, self.rate), _rt(clip.duration - off, self.rate))
+        tail.source_range = otio.opentime.TimeRange(split_src, _rt(clip.duration - off, self.rate))
+        # deepcopy duplicated the clip's markers onto BOTH halves. Keep each marker only on the half
+        # whose source range actually contains it (markers are stored in source coords), so a marker
+        # from the first half doesn't reappear in the tail.
+        boundary = split_src.to_frames()
+        item.markers[:] = [m for m in item.markers
+                           if m.marked_range.start_time.to_frames() < boundary]
+        tail.markers[:] = [m for m in tail.markers
+                           if m.marked_range.start_time.to_frames() >= boundary]
         track.insert(idx + 1, tail)
         return f"split {clip.name} @ {op.at_frame}"
 
@@ -261,7 +275,16 @@ class InterchangeAdapter(GrabAdapter):
         return FORMAT_BY_EXT[ext]
 
     def snapshot(self, source: Any, *, fmt: Optional[str] = None) -> TimelineIR:
-        timeline = otio.adapters.read_from_file(source, adapter_name=self._fmt_for(source, fmt))
+        name = self._fmt_for(source, fmt)
+        # Mirror the write path's guard: on a core-only install the FCPXML/AAF/EDL OTIO adapters are
+        # absent (they ship in the `interchange` extra). Say so plainly instead of leaking a raw OTIO
+        # error. otio_json (.otio/.otioz) is built in, so the default fixture path is never affected.
+        if name not in set(otio.adapters.available_adapter_names()):
+            raise RuntimeError(
+                f"the '{name}' OpenTimelineIO adapter isn't installed — needed to read "
+                f"'{os.path.basename(str(source))}'. Install it with: "
+                f"pip install 'film-grip[interchange]'")
+        timeline = otio.adapters.read_from_file(source, adapter_name=name)
         return TimelineIR.from_otio(timeline)
 
     def get_selection(self, source: Any, ir: Optional[TimelineIR] = None) -> Selection:
@@ -280,22 +303,29 @@ class InterchangeAdapter(GrabAdapter):
         if not res.ok:
             return ApplyResult(ok=False, errors=[str(e) for e in res.errors])
 
-        applied, warnings = OtioMutator(ir).apply(plan)
+        applied, unsupported = OtioMutator(ir).apply(plan)
 
         out = out_path or source
         fmt = self._fmt_for(out, out_format)
-        warnings.extend(self._lossy_warnings(ir, fmt))
+        warnings = self._lossy_warnings(ir, fmt)
+        if not applied:
+            # Every requested op was unrepresentable — don't rewrite an identical file and imply work.
+            return ApplyResult(ok=False, unsupported=unsupported, warnings=warnings,
+                               diff="  (no applicable ops)")
         try:
             otio.adapters.write_to_file(ir.timeline, out, adapter_name=fmt)
         except Exception as exc:
             # The target format genuinely can't represent this timeline (e.g. EDL is single-track
             # cuts-only). Refuse cleanly rather than writing a corrupt/garbage file.
-            return ApplyResult(ok=False, applied=applied, warnings=warnings,
+            return ApplyResult(ok=False, applied=applied, warnings=warnings, unsupported=unsupported,
                                errors=[f"cannot write {fmt}: {exc}"])
 
-        diff = "\n".join(f"  ✓ {d}" for d in applied) or "  (no rebuild ops)"
+        diff = "\n".join(f"  ✓ {d}" for d in applied)
         diff += f"\n  → wrote {fmt} to {out}"
-        return ApplyResult(ok=True, applied=applied, diff=diff, warnings=warnings)
+        # ok only when EVERY requested op landed — a partial apply (some ops unsupported) is ok=False
+        # with the file holding the ops that did apply.
+        return ApplyResult(ok=not unsupported, applied=applied, diff=diff,
+                           warnings=warnings, unsupported=unsupported)
 
     @staticmethod
     def _lossy_warnings(ir: TimelineIR, fmt: str) -> list[str]:

@@ -19,6 +19,48 @@ def _id(ir, name):
     return next(c for c in ir.real_clips() if c.name == name).id
 
 
+def test_split_partitions_markers_by_half_not_duplicates(tmp_path):
+    # _split used item.deepcopy() for the tail, copying ALL markers onto BOTH halves. Each marker must
+    # land only on the half whose source range contains it — total markers conserved, none duplicated.
+    from filmgrip.adapters.interchange import OtioMutator
+    from filmgrip.core.ir import TimelineIR
+
+    def rt(f):
+        return otio.opentime.RationalTime(f, 24.0)
+
+    tl = otio.schema.Timeline(name="t")
+    tl.global_start_time = rt(0)
+    v = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+    clip = otio.schema.Clip(name="A", media_reference=otio.schema.ExternalReference(target_url="/m/a.mov"),
+                            source_range=otio.opentime.TimeRange(rt(0), rt(48)))
+    clip.markers.append(otio.schema.Marker(name="head", marked_range=otio.opentime.TimeRange(rt(5), rt(1))))
+    clip.markers.append(otio.schema.Marker(name="tail", marked_range=otio.opentime.TimeRange(rt(30), rt(1))))
+    v.append(clip)
+    tl.tracks.append(v)
+    path = str(tmp_path / "t.otio")
+    otio.adapters.write_to_file(tl, path)
+
+    ir = TimelineIR.from_otio_file(path)
+    cid = ir.real_clips()[0].id
+    applied, unsupported = OtioMutator(ir).apply(
+        EditPlan.parse({"ops": [{"op": "split", "clip_id": cid, "at_frame": 24}]}))
+    assert not unsupported and len(applied) == 1
+    clips = [ch for tr in ir.timeline.tracks for ch in tr if isinstance(ch, otio.schema.Clip)]
+    assert len(clips) == 2
+    assert sum(len(c.markers) for c in clips) == 2  # conserved, not doubled to 4
+    names_by_half = [[m.name for m in c.markers] for c in clips]
+    assert ["head"] in names_by_half and ["tail"] in names_by_half
+
+
+def test_snapshot_missing_extra_gives_friendly_error(monkeypatch, fixtures_dir):
+    # On a core-only install the fcp_xml OTIO adapter is absent. snapshot() must point at the extra,
+    # not leak a raw OTIO error (mirrors the write path's guard).
+    monkeypatch.setattr(otio.adapters, "available_adapter_names", lambda: ["otio_json"])
+    with pytest.raises(Exception) as ei:
+        InterchangeAdapter().snapshot(str(fixtures_dir / "sample.fcpxml"))
+    assert "film-grip[interchange]" in str(ei.value)
+
+
 def test_reads_fcpxml_and_edl_into_ir(fixtures_dir):
     a = InterchangeAdapter()
     ir_fcp = a.snapshot(str(fixtures_dir / "sample.fcpxml"))
@@ -47,18 +89,23 @@ def test_trim_survives_fcpxml_roundtrip_with_lossy_warning(fixtures_dir, tmp_pat
     assert shotB.duration == 60
 
 
-def test_add_transition_is_warned_not_applied(fixtures_dir, tmp_path):
+def test_add_transition_is_rejected_not_faked(fixtures_dir, tmp_path):
     a = InterchangeAdapter()
     src = str(fixtures_dir / "sample.fcpxml")
     ir = a.snapshot(src)
-    # add_transition is the one structural op the rebuild path leaves to the live editor — must
-    # warn, not crash. (move/insert/ripple now DO apply via OTIO — see test_structural_ops_*.)
+    # add_transition is the one structural op the rebuild path leaves to the live editor. It must be
+    # reported as unsupported (ok=False) — never ok=True with a buried warning, which would claim a
+    # success that didn't happen. (move/insert/ripple now DO apply via OTIO — see test_structural_ops_*.)
+    out = tmp_path / "o.fcpxml"
     plan = EditPlan.parse({"ops": [
         {"op": "add_transition", "clip_id": _id(ir, "shotB"), "edge": "out", "type": "cross_dissolve"},
     ]})
-    res = a.apply(plan, src, out_path=str(tmp_path / "o.fcpxml"))
-    assert res.ok
-    assert any("add_transition" in w and "not applied" in w for w in res.warnings)
+    res = a.apply(plan, src, out_path=str(out))
+    assert res.ok is False
+    assert res.applied == []
+    assert any("add_transition" in u for u in res.unsupported)
+    # nothing applied → no output file written (don't imply work that didn't happen)
+    assert not out.exists()
 
 
 def _build_otio(tmp_path, tracks):
