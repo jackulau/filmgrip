@@ -52,6 +52,15 @@ def test_split_partitions_markers_by_half_not_duplicates(tmp_path):
     assert ["head"] in names_by_half and ["tail"] in names_by_half
 
 
+def test_snapshot_missing_extra_gives_friendly_error(monkeypatch, fixtures_dir):
+    # On a core-only install the fcp_xml OTIO adapter is absent. snapshot() must point at the extra,
+    # not leak a raw OTIO error (mirrors the write path's guard).
+    monkeypatch.setattr(otio.adapters, "available_adapter_names", lambda: ["otio_json"])
+    with pytest.raises(Exception) as ei:
+        InterchangeAdapter().snapshot(str(fixtures_dir / "sample.fcpxml"))
+    assert "film-grip[interchange]" in str(ei.value)
+
+
 def test_reads_fcpxml_and_edl_into_ir(fixtures_dir):
     a = InterchangeAdapter()
     ir_fcp = a.snapshot(str(fixtures_dir / "sample.fcpxml"))

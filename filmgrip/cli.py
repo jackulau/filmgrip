@@ -24,11 +24,15 @@ def build_parser() -> argparse.ArgumentParser:
     edit = sub.add_parser("edit", help="apply a natural-language edit to the active timeline")
     edit.add_argument("prompt", nargs="?", default="", help="natural-language edit instruction")
     edit.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
-    edit.add_argument("--fixture", help="run the pipeline against a .otio fixture instead of a live editor")
+    edit.add_argument("--fixture", help="run against a fixture file instead of a live editor; the "
+                                        "adapter is chosen by extension (.otio/.fcpxml/.mlt/.kdenlive/"
+                                        ".wfp/CapCut .json)")
     edit.add_argument("--plan", help="apply a recorded EditPlan JSON instead of calling Claude (offline e2e)")
     edit.add_argument("--backend", help="planner backend (default: claude; or $FILMGRIP_BACKEND)")
     edit.add_argument("--out", help="output path for fixture/interchange apply (default: <name>.edited.<ext>)")
-    edit.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
+    edit.add_argument("--dry-run", action="store_true",
+                      help="validate + print the diff without applying (note: with a prompt and no "
+                           "--plan, the planner still makes a billable call to produce the plan)")
 
     grab = sub.add_parser(
         "grab",

@@ -275,7 +275,16 @@ class InterchangeAdapter(GrabAdapter):
         return FORMAT_BY_EXT[ext]
 
     def snapshot(self, source: Any, *, fmt: Optional[str] = None) -> TimelineIR:
-        timeline = otio.adapters.read_from_file(source, adapter_name=self._fmt_for(source, fmt))
+        name = self._fmt_for(source, fmt)
+        # Mirror the write path's guard: on a core-only install the FCPXML/AAF/EDL OTIO adapters are
+        # absent (they ship in the `interchange` extra). Say so plainly instead of leaking a raw OTIO
+        # error. otio_json (.otio/.otioz) is built in, so the default fixture path is never affected.
+        if name not in set(otio.adapters.available_adapter_names()):
+            raise RuntimeError(
+                f"the '{name}' OpenTimelineIO adapter isn't installed — needed to read "
+                f"'{os.path.basename(str(source))}'. Install it with: "
+                f"pip install 'film-grip[interchange]'")
+        timeline = otio.adapters.read_from_file(source, adapter_name=name)
         return TimelineIR.from_otio(timeline)
 
     def get_selection(self, source: Any, ir: Optional[TimelineIR] = None) -> Selection:
