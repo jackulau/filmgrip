@@ -160,11 +160,15 @@ class MltAdapter(GrabAdapter):
                     entry.set("in", str(cin + op.delta))
                 applied.append(f"trim {clip.name} {op.edge} {op.delta:+d}")
             elif op.op == "delete":
+                idx = list(pl).index(entry)
                 pl.remove(entry)
                 if not op.ripple:
-                    blank = etree.SubElement(pl, "blank")
+                    # Leave the gap exactly where the clip was, so downstream clips keep their
+                    # positions. (SubElement appends to the END — wrong; build a standalone <blank>
+                    # and insert it at the removed entry's original index.)
+                    blank = etree.Element("blank")
                     blank.set("length", str(clip.duration))
-                    pl.insert(list(pl).index(blank), blank)  # keep order best-effort
+                    pl.insert(idx, blank)
                 applied.append(f"delete {clip.name}{' (ripple)' if op.ripple else ''}")
             elif op.op == "move":
                 pl.remove(entry)

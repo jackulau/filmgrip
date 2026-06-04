@@ -58,6 +58,25 @@ def test_delete_ripple_removes_clip(fixtures_dir, tmp_path):
     assert a.apply(plan, src, out_path=out).ok
     ir2 = a.snapshot(out)
     assert [c.name for c in ir2.real_clips()] == ["alpha", "charlie"]
+    # ripple closes the gap: charlie slides up to where bravo started
+    assert next(c for c in ir2.real_clips() if c.name == "charlie").start == 48
+
+
+def test_delete_non_ripple_leaves_gap_in_place(fixtures_dir, tmp_path):
+    # Deleting the middle clip WITHOUT ripple must leave a gap where it was, so charlie keeps its
+    # original start (120). The old code appended the <blank> to the end of the playlist, shifting
+    # charlie to 48 (a de-facto ripple) and leaving a stray trailing blank.
+    a = MltAdapter()
+    src = str(fixtures_dir / "sample.mlt")
+    ir = a.snapshot(src)
+    plan = EditPlan.parse({"ops": [{"op": "delete", "clip_id": _id(ir, "bravo"), "ripple": False}]})
+    out = str(tmp_path / "out.mlt")
+    assert a.apply(plan, src, out_path=out).ok
+    etree.parse(out)  # still well-formed
+    ir2 = a.snapshot(out)
+    assert [c.name for c in ir2.real_clips()] == ["alpha", "charlie"]
+    assert next(c for c in ir2.real_clips() if c.name == "charlie").start == 120  # gap preserved
+    assert next(c for c in ir2.real_clips() if c.name == "alpha").start == 0
 
 
 def test_unsupported_op_is_rejected_not_faked(fixtures_dir, tmp_path):
