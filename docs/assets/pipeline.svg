@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 300" width="920" height="300" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="film-grip pipeline: select clips, capture an FGX context bundle, Claude returns a typed EditPlan, validate, apply via the editor adapter">
+  <rect x="8" y="8" width="904" height="284" rx="14" fill="#161b22" stroke="#30363d"/>
+
+  <!-- filmstrip motif, top-right -->
+  <g fill="#30363d">
+    <rect x="724" y="30" width="156" height="26" rx="3"/>
+  </g>
+  <g fill="#0d1117">
+    <rect x="730" y="34" width="14" height="18" rx="2"/>
+    <rect x="750" y="34" width="14" height="18" rx="2"/>
+    <rect x="770" y="34" width="14" height="18" rx="2"/>
+    <rect x="790" y="34" width="14" height="18" rx="2"/>
+    <rect x="810" y="34" width="14" height="18" rx="2"/>
+    <rect x="830" y="34" width="14" height="18" rx="2"/>
+    <rect x="850" y="34" width="14" height="18" rx="2"/>
+    <rect x="870" y="34" width="4" height="18" rx="1"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="40" y="74" font-size="42" font-weight="700" fill="#e6edf3">film<tspan fill="#58a6ff">-grip</tspan></text>
+  <text x="42" y="104" font-size="17" fill="#8b949e">react-grab, but for video editors</text>
+
+  <!-- flow nodes -->
+  <!-- node 1: Select (blue accent = start) -->
+  <g>
+    <rect x="36" y="170" width="148" height="86" rx="10" fill="#1c2330" stroke="#30363d"/>
+    <rect x="36" y="170" width="5" height="86" rx="2.5" fill="#58a6ff"/>
+    <text x="110" y="206" text-anchor="middle" font-size="16" font-weight="600" fill="#e6edf3">Select</text>
+    <text x="110" y="227" text-anchor="middle" font-size="11.5" fill="#8b949e">clips in your</text>
+    <text x="110" y="242" text-anchor="middle" font-size="11.5" fill="#8b949e">editor</text>
+  </g>
+  <!-- node 2: Capture -->
+  <g>
+    <rect x="212" y="170" width="148" height="86" rx="10" fill="#1c2330" stroke="#30363d"/>
+    <text x="286" y="206" text-anchor="middle" font-size="16" font-weight="600" fill="#e6edf3">Capture</text>
+    <text x="286" y="227" text-anchor="middle" font-size="11.5" fill="#8b949e">compact FGX</text>
+    <text x="286" y="242" text-anchor="middle" font-size="11.5" fill="#8b949e">context bundle</text>
+  </g>
+  <!-- node 3: Claude -->
+  <g>
+    <rect x="388" y="170" width="148" height="86" rx="10" fill="#1c2330" stroke="#30363d"/>
+    <text x="462" y="206" text-anchor="middle" font-size="16" font-weight="600" fill="#e6edf3">Claude</text>
+    <text x="462" y="227" text-anchor="middle" font-size="11.5" fill="#8b949e">typed EditPlan</text>
+    <text x="462" y="242" text-anchor="middle" font-size="11.5" fill="#8b949e">(ops over clip IDs)</text>
+  </g>
+  <!-- node 4: Validate -->
+  <g>
+    <rect x="564" y="170" width="148" height="86" rx="10" fill="#1c2330" stroke="#30363d"/>
+    <text x="638" y="206" text-anchor="middle" font-size="16" font-weight="600" fill="#e6edf3">Validate</text>
+    <text x="638" y="227" text-anchor="middle" font-size="11.5" fill="#8b949e">reject bad IDs</text>
+    <text x="638" y="242" text-anchor="middle" font-size="11.5" fill="#8b949e">&amp; out-of-range</text>
+  </g>
+  <!-- node 5: Apply (green accent = lands) -->
+  <g>
+    <rect x="740" y="170" width="148" height="86" rx="10" fill="#1c2330" stroke="#30363d"/>
+    <rect x="883" y="170" width="5" height="86" rx="2.5" fill="#3fb950"/>
+    <text x="814" y="206" text-anchor="middle" font-size="16" font-weight="600" fill="#e6edf3">Apply</text>
+    <text x="814" y="227" text-anchor="middle" font-size="11.5" fill="#8b949e">via the editor's</text>
+    <text x="814" y="242" text-anchor="middle" font-size="11.5" fill="#8b949e">adapter</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#6e7681" stroke-width="2" fill="none">
+    <path d="M188 213 L208 213"/><path d="M202 208 L208 213 L202 218" stroke="#58a6ff"/>
+    <path d="M364 213 L384 213"/><path d="M378 208 L384 213 L378 218" stroke="#58a6ff"/>
+    <path d="M540 213 L560 213"/><path d="M554 208 L560 213 L554 218" stroke="#58a6ff"/>
+    <path d="M716 213 L736 213"/><path d="M730 208 L736 213 L730 218" stroke="#58a6ff"/>
+  </g>
+</svg>

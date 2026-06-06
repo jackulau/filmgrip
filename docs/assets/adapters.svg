@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 480" width="920" height="480" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="One OTIO IR plus a typed EditPlan, projected through thin per-editor adapters, with honest per-editor support tiers">
+  <rect x="8" y="8" width="904" height="464" rx="14" fill="#161b22" stroke="#30363d"/>
+
+  <text x="36" y="46" font-size="20" font-weight="700" fill="#e6edf3">One universal IR. Thin per-editor adapters.</text>
+  <text x="36" y="69" font-size="13.5" fill="#8b949e">Every timeline is an OpenTimelineIO graph; a typed EditPlan applies to each editor by the most honest path it has.</text>
+
+  <!-- hub -->
+  <g>
+    <rect x="40" y="182" width="196" height="128" rx="12" fill="#10243f" stroke="#58a6ff"/>
+    <text x="138" y="232" text-anchor="middle" font-size="17" font-weight="700" fill="#e6edf3">OTIO IR</text>
+    <text x="138" y="256" text-anchor="middle" font-size="13" fill="#cdd9e5">+ typed EditPlan</text>
+    <text x="138" y="284" text-anchor="middle" font-size="11" fill="#8b949e">the lossless pivot</text>
+  </g>
+
+  <!-- connectors hub -> rows -->
+  <g stroke="#3a4250" stroke-width="1.5" fill="none">
+    <path d="M236 246 C 330 246 372 92 466 92"/>
+    <path d="M236 246 C 330 246 372 150 466 150"/>
+    <path d="M236 246 C 330 246 372 208 466 208"/>
+    <path d="M236 246 C 340 246 380 266 466 266"/>
+    <path d="M236 246 C 330 246 372 324 466 324"/>
+    <path d="M236 246 C 330 246 372 382 466 382"/>
+    <path d="M236 246 C 330 246 372 440 466 440"/>
+  </g>
+
+  <!-- rows -->
+  <!-- 1 Resolve : LIVE -->
+  <g>
+    <rect x="466" y="70" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="89" font-size="14.5" font-weight="600" fill="#e6edf3">DaVinci Resolve (Studio)</text>
+    <text x="484" y="106" font-size="11.5" fill="#8b949e">native Python scripting API · live write-back</text>
+    <rect x="806" y="81" width="62" height="22" rx="11" fill="#0f2417" stroke="#3fb950"/>
+    <text x="837" y="96" text-anchor="middle" font-size="10.5" font-weight="700" fill="#3fb950">LIVE</text>
+  </g>
+  <!-- 2 Final Cut : interchange -->
+  <g>
+    <rect x="466" y="128" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="147" font-size="14.5" font-weight="600" fill="#e6edf3">Final Cut Pro</text>
+    <text x="484" y="164" font-size="11.5" fill="#8b949e">FCPXML round-trip · re-import</text>
+    <rect x="764" y="139" width="104" height="22" rx="11" fill="#10243f" stroke="#58a6ff"/>
+    <text x="816" y="154" text-anchor="middle" font-size="10.5" font-weight="700" fill="#58a6ff">INTERCHANGE</text>
+  </g>
+  <!-- 3 Premiere : interchange -->
+  <g>
+    <rect x="466" y="186" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="205" font-size="14.5" font-weight="600" fill="#e6edf3">Premiere Pro</text>
+    <text x="484" y="222" font-size="11.5" fill="#8b949e">FCP7 XML / AAF · UXP panel is a future path</text>
+    <rect x="764" y="197" width="104" height="22" rx="11" fill="#10243f" stroke="#58a6ff"/>
+    <text x="816" y="212" text-anchor="middle" font-size="10.5" font-weight="700" fill="#58a6ff">INTERCHANGE</text>
+  </g>
+  <!-- 4 Kdenlive/Shotcut : offline -->
+  <g>
+    <rect x="466" y="244" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="263" font-size="14.5" font-weight="600" fill="#e6edf3">Kdenlive · Shotcut</text>
+    <text x="484" y="280" font-size="11.5" fill="#8b949e">native MLT XML · writes the project file directly</text>
+    <rect x="792" y="255" width="76" height="22" rx="11" fill="#0c2a2c" stroke="#39c5cf"/>
+    <text x="830" y="270" text-anchor="middle" font-size="10.5" font-weight="700" fill="#39c5cf">OFFLINE</text>
+  </g>
+  <!-- 5 Avid : best-effort -->
+  <g>
+    <rect x="466" y="302" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="321" font-size="14.5" font-weight="600" fill="#e6edf3">Avid Media Composer</text>
+    <text x="484" y="338" font-size="11.5" fill="#8b949e">AAF conform · lossy, manual relink</text>
+    <rect x="766" y="313" width="102" height="22" rx="11" fill="#2a2310" stroke="#d29922"/>
+    <text x="817" y="328" text-anchor="middle" font-size="10.5" font-weight="700" fill="#d29922">BEST-EFFORT</text>
+  </g>
+  <!-- 6 CapCut : best-effort -->
+  <g>
+    <rect x="466" y="360" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="379" font-size="14.5" font-weight="600" fill="#e6edf3">CapCut (International)</text>
+    <text x="484" y="396" font-size="11.5" fill="#8b949e">offline draft_content.json · version-gated</text>
+    <rect x="766" y="371" width="102" height="22" rx="11" fill="#2a2310" stroke="#d29922"/>
+    <text x="817" y="386" text-anchor="middle" font-size="10.5" font-weight="700" fill="#d29922">BEST-EFFORT</text>
+  </g>
+  <!-- 7 Filmora : read-only -->
+  <g>
+    <rect x="466" y="418" width="418" height="44" rx="9" fill="#1c2330" stroke="#30363d"/>
+    <text x="484" y="437" font-size="14.5" font-weight="600" fill="#e6edf3">Wondershare Filmora</text>
+    <text x="484" y="454" font-size="11.5" fill="#8b949e">.wfp parse · no automation API exists</text>
+    <rect x="778" y="429" width="90" height="22" rx="11" fill="#2a1314" stroke="#f85149"/>
+    <text x="823" y="444" text-anchor="middle" font-size="10.5" font-weight="700" fill="#f85149">READ-ONLY</text>
+  </g>
+</svg>
