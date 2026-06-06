@@ -392,6 +392,35 @@
       "title": "RenameTrack",
       "type": "object"
     },
+    "Retime": {
+      "additionalProperties": false,
+      "description": "Change a clip's playback speed \u2014 the real retime primitive, via an OTIO time-warp effect.\n\n``speed_percent`` is a percentage of normal speed: 100 = normal, 200 = 2\u00d7 faster, 50 = half\nspeed, a negative value plays in reverse (e.g. -100 = reverse at normal speed), and 0 = a\nfreeze-frame. It maps to an ``otio.schema.LinearTimeWarp`` (``FreezeFrame`` at 0) on the clip,\nwhich the OTIO-rebuild path carries \u2014 so it lands on every rebuild/interchange editor and in\nResolve via the rebuild. The warp changes how the source plays *within* the clip's existing\ntimeline span; it does not move neighbours (re-ripple separately if you want the gap closed).",
+      "properties": {
+        "op": {
+          "const": "retime",
+          "default": "retime",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "speed_percent": {
+          "default": 100.0,
+          "description": "100=normal, 200=2x faster, 50=half speed, negative=reverse, 0=freeze-frame",
+          "maximum": 10000.0,
+          "minimum": -10000.0,
+          "title": "Speed Percent",
+          "type": "number"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "Retime",
+      "type": "object"
+    },
     "Ripple": {
       "additionalProperties": false,
       "description": "Shift every clip at/after ``from_frame`` on a track by ``delta`` frames.",
@@ -430,6 +459,33 @@
         "delta"
       ],
       "title": "Ripple",
+      "type": "object"
+    },
+    "SetEnabled": {
+      "additionalProperties": false,
+      "description": "Enable or disable a clip without removing it (a disabled clip stays on the timeline but is\nskipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO\nrebuild (the clip's ``enabled`` flag).",
+      "properties": {
+        "op": {
+          "const": "set_enabled",
+          "default": "set_enabled",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "True = enable the clip, False = disable (mute) it",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clip_id",
+        "enabled"
+      ],
+      "title": "SetEnabled",
       "type": "object"
     },
     "SetProperty": {
@@ -569,7 +625,9 @@
             "move": "#/$defs/Move",
             "move_to_bin": "#/$defs/MoveToBin",
             "rename_track": "#/$defs/RenameTrack",
+            "retime": "#/$defs/Retime",
             "ripple": "#/$defs/Ripple",
+            "set_enabled": "#/$defs/SetEnabled",
             "set_property": "#/$defs/SetProperty",
             "split": "#/$defs/Split",
             "trim": "#/$defs/Trim"
@@ -618,6 +676,12 @@
           },
           {
             "$ref": "#/$defs/MoveToBin"
+          },
+          {
+            "$ref": "#/$defs/Retime"
+          },
+          {
+            "$ref": "#/$defs/SetEnabled"
           }
         ]
       },

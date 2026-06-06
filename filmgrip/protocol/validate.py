@@ -122,7 +122,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
-                    "split", "move_to_bin"):
+                    "split", "move_to_bin", "retime", "set_enabled"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -304,4 +304,11 @@ def _describe(op, ir: TimelineIR) -> str:
         return f"create_bin {op.name!r}{loc}"
     if op.op == "move_to_bin":
         return f"move_to_bin {nm(op.clip_id)} → {op.bin!r}"
+    if op.op == "retime":
+        pct = op.speed_percent
+        how = ("freeze-frame" if pct == 0
+               else f"{pct:g}% speed" + (" (reverse)" if pct < 0 else ""))
+        return f"retime {nm(op.clip_id)} → {how}"
+    if op.op == "set_enabled":
+        return f"{'enable' if op.enabled else 'disable'} {nm(op.clip_id)}"
     return op.op

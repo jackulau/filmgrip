@@ -73,8 +73,8 @@ def payload_query_clips(ctx: PlannerContext, *, name: Optional[str] = None,
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
-    ops = ("trim, move, insert, delete, set_property, add_marker, add_transition, split, ripple, "
-           "import_audio, add_track, rename_track, create_bin, move_to_bin")
+    ops = ("trim, move, insert, delete, set_property, set_enabled, add_marker, add_transition, "
+           "split, ripple, retime, import_audio, add_track, rename_track, create_bin, move_to_bin")
     props = ", ".join(sorted(ep.ALLOWED_PROPERTIES))
     no_audio = ", ".join(sorted(ep.AUDIO_PROPS_UNSUPPORTED))
     return (
@@ -95,6 +95,9 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "step.\n"
         "Organizing: add_track / rename_track / create_bin / move_to_bin tidy tracks and media-pool "
         "bins.\n"
+        "Speed/visibility: retime sets a clip's speed_percent (200=2x faster, 50=half, negative="
+        "reverse, 0=freeze-frame); set_enabled enables/disables a clip without deleting it. retime "
+        "warps playback within the clip's existing span — add a ripple if you want the gap closed.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 

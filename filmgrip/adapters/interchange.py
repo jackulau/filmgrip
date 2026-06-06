@@ -38,6 +38,7 @@ FORMAT_BY_EXT = {
 # Only add_transition stays out — transition fidelity is format-dependent and best done live.
 REBUILD_OPS = frozenset({
     "trim", "delete", "split", "add_marker", "set_property", "move", "insert", "ripple",
+    "retime", "set_enabled",
 })
 
 _MARKER_COLOR = {
@@ -249,6 +250,30 @@ class OtioMutator:
         meta = item.metadata.setdefault("filmgrip", {})
         meta[op.key] = op.value
         return f"set {clip.name}.{op.key} = {op.value!r}"
+
+    def _retime(self, op) -> str:
+        """Attach an OTIO time-warp so the clip plays at ``speed_percent`` (0 = freeze, <0 = reverse).
+
+        The warp lives in the clip's ``effects`` and changes how the source plays inside the clip's
+        existing timeline span — it does not move neighbours. Re-applying replaces any prior
+        film-grip time-warp rather than stacking (``FreezeFrame`` subclasses ``LinearTimeWarp``, so
+        the filter catches both).
+        """
+        clip, item = self._clip_and_item(op)
+        item.effects[:] = [e for e in item.effects
+                           if not isinstance(e, otio.schema.LinearTimeWarp)]
+        pct = op.speed_percent
+        if pct == 0:
+            item.effects.append(otio.schema.FreezeFrame(name="filmgrip-freeze"))
+            return f"retime {clip.name} → freeze-frame"
+        item.effects.append(
+            otio.schema.LinearTimeWarp(name="filmgrip-retime", time_scalar=pct / 100.0))
+        return f"retime {clip.name} → {pct:g}%" + (" (reverse)" if pct < 0 else "")
+
+    def _set_enabled(self, op) -> str:
+        clip, item = self._clip_and_item(op)
+        item.enabled = bool(op.enabled)
+        return f"{'enable' if op.enabled else 'disable'} {clip.name}"
 
 
 class InterchangeAdapter(GrabAdapter):
