@@ -1,14 +1,12 @@
 # film-grip
 
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="film-grip pipeline — select clips, capture a compact FGX bundle, Claude returns a typed EditPlan, film-grip validates, then applies via the editor's adapter" width="100%">
+</p>
+
 **react-grab, but for video editors.** Select clips/resources inside your editor, add them to
 context with a natural-language prompt, and Claude produces a *typed, validated* edit that
 film-grip applies through the right per-editor adapter.
-
-```
-select clips in editor ──► film-grip captures a compact context bundle ──► you type a prompt
-        ──► Claude returns a typed EditPlan (ops over stable clip IDs) ──► film-grip validates
-        ──► applies via the editor's adapter (live, or interchange round-trip)
-```
 
 ## Why it works across many editors
 
@@ -19,17 +17,25 @@ patch. film-grip's equivalent is **one universal IR + one typed protocol + thin 
   graph. OTIO is the lossless pivot; everything else is a projection of it.
 - **Typed `EditPlan`** — Claude never emits editor-specific code. It proposes bounded, reversible
   primitives that reference **stable clip IDs**. Hallucinated IDs/frames can't survive validation.
-  - *edit / cut*: `trim` · `move` · `insert` · `split` · `ripple` · `delete` (ripple-delete closes the gap)
+  - *edit / cut*: `trim` · `move` · `insert` · `split` · `ripple` · `delete` (ripple-delete closes the gap) · `retime` (speed up / slow down / reverse / freeze-frame)
   - *audio / SFX*: `import_audio` — drop a sound effect from your library onto an audio track · audio-aware `insert`
   - *organize*: `add_track` · `rename_track` · `create_bin` · `move_to_bin`
-  - *annotate*: `add_marker` · `set_property` · `add_transition`
+  - *annotate / state*: `add_marker` · `set_property` · `set_enabled` (enable / disable a clip without deleting it) · `add_transition`
 - **FGX serializer** — a token-frugal projection (integer frames, abbreviated rows, selected
   subgraph + 1-hop neighbors, media by reference, multi-turn deltas). A selection that is
   multiple kilobytes of raw FCPXML becomes a few hundred tokens.
 - **Adapters** — Resolve native (live flagship), an OTIO-interchange family (FCP / Premiere /
   Kdenlive / Shotcut / Avid), CapCut offline-JSON, and a read-only Filmora parser.
 
+<p align="center">
+  <img src="docs/assets/fgx-savings.svg" alt="FGX token savings — a multi-kilobyte FCPXML selection becomes a few hundred tokens of context" width="100%">
+</p>
+
 ## Editor coverage (honest)
+
+<p align="center">
+  <img src="docs/assets/adapters.svg" alt="One OTIO IR plus a typed EditPlan, projected through thin per-editor adapters, each labelled with its honest support tier: Resolve live, Final Cut / Premiere interchange, Kdenlive / Shotcut offline, Avid / CapCut best-effort, Filmora read-only" width="100%">
+</p>
 
 | Editor | Role | Mechanism | Write-back |
 |---|---|---|---|
@@ -49,7 +55,7 @@ for the full per-editor + per-op matrix (also in [docs/CAPABILITIES.md](docs/CAP
 ## Editing live in DaVinci Resolve
 
 Resolve's scripting API can apply markers, properties and ripple-deletes directly, but **can't**
-reposition clips precisely. So structural edits (`trim`/`move`/`split`/`insert`/`ripple`) take the
+reposition clips precisely. So structural edits (`trim`/`move`/`split`/`insert`/`ripple`/`retime`) take the
 **OTIO rebuild path**: film-grip exports the timeline to OTIO, mutates the graph, and re-imports it
 as a *new* timeline — your original is left untouched. That round-trip is lossy (color grades, Fusion
 comps and some transitions don't carry), and film-grip says so in the apply output rather than
@@ -76,6 +82,19 @@ film-grip edit "add a whoosh when the logo appears"
 
 `add_track`, `rename_track`, `create_bin` and `move_to_bin` tidy tracks and the media pool — e.g.
 "make a bin called *selects* and move the hero clip into it", or "add a stereo audio track for SFX".
+
+## Speed, reverse, freeze &amp; visibility
+
+`retime` changes a clip's playback speed through an OpenTimelineIO time-warp — *"make the b-roll
+2× faster"*, *"play the last shot in reverse"*, *"freeze the final frame"*. `speed_percent` above
+100 speeds up, below 100 slows down, a negative value reverses, and `0` is a freeze-frame. It rides
+the same OTIO-rebuild path as the structural edits, so it lands on every rebuild/interchange editor
+and in Resolve via the rebuild (the warp changes playback within the clip's span — add a `ripple` if
+you want the gap closed).
+
+`set_enabled` mutes a clip without deleting it — *"disable the second take"* — and applies **live**
+in Resolve (`SetClipEnabled`) as well as through the rebuild. Run `film-grip editors` for the
+per-op, per-editor matrix so you always know which edits land where.
 
 ## A panel inside Resolve
 
@@ -126,6 +145,7 @@ film-grip edit --fixture tests/fixtures/cut.otio --plan tests/fixtures/plan.json
 film-grip edit "add a blue marker on the selected clip"
 film-grip edit "split the interview at the playhead and tighten the open by 12 frames"
 film-grip edit "add a whoosh when the title flies in, then move the b-roll to v2"
+film-grip edit "make the b-roll 2x faster, reverse the last shot, and disable the second take"
 
 film-grip status            # is film-grip able to reach your editor? (the doctor)
 film-grip editors           # per-editor + per-op capability matrix
