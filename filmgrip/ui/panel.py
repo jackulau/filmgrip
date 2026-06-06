@@ -79,6 +79,22 @@ class PanelResult:
     text: str
 
 
+def format_apply_body(res) -> str:
+    """Render an :class:`~filmgrip.adapters.base.ApplyResult` for the panel's output area, honestly.
+
+    Shows what DID apply (``diff``), then ops that could NOT (``✗`` unsupported), then lossy notes
+    (``⚠`` warnings), then hard errors. Mirrors the CLI's ``_emit_apply_result`` so the in-Resolve
+    panel never hides an unsupported op behind a bare "apply failed" — the user sees exactly which
+    op had no path, the same as on the command line.
+    """
+    parts: list[str] = [res.diff] if res.diff else []
+    parts += [f"  ✗ {u}" for u in res.unsupported]
+    parts += [f"  ⚠ {w}" for w in res.warnings]
+    if res.errors:
+        parts.append("apply failed:\n  " + "\n  ".join(res.errors))
+    return "\n".join(parts) if parts else ("ok" if res.ok else "apply failed")
+
+
 # run_edit(prompt, dry_run) -> PanelResult : the edit seam. grab_context() -> str : the capture
 # seam (the <selected_clips> block for Copy-context). The live factory below wires both to the real
 # pipeline; tests inject fakes.
@@ -187,9 +203,6 @@ def live_controller(session, *, adapter=None) -> PanelController:
         if dry_run:
             return PanelResult(True, render_dry_run(result.plan, cur_ir))
         res = adapter.apply(result.plan, session)
-        body = res.diff if res.ok else ("apply failed:\n  " + "\n  ".join(res.errors))
-        if res.warnings:
-            body += "\n  ⚠ " + "\n  ⚠ ".join(res.warnings)
-        return PanelResult(res.ok, body)
+        return PanelResult(res.ok, format_apply_body(res))
 
     return PanelController(run_edit, selection_summary=summary, grab_context=grab_context)

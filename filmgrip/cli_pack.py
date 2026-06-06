@@ -99,13 +99,11 @@ def _apply_fixture(args, pack) -> int:
         return 0 if validate(plan, ir).ok else 1
 
     from .adapters.interchange import InterchangeAdapter
+    from .cli_edit import _emit_apply_result
 
     out = args.out or (os.path.splitext(args.fixture)[0] + ".edited" + os.path.splitext(args.fixture)[1])
     res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
-    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    return 0 if res.ok else 1
+    return _emit_apply_result(res)
 
 
 def _format_prompt(pack) -> str:
@@ -180,10 +178,8 @@ def _apply_prompt(args, pack) -> int:
         res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
     else:
         res = adapter.apply(plan, session)
-    _emit(res.diff if res.ok else "apply failed:\n  " + "\n  ".join(res.errors))
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    return 0 if res.ok else 1
+    from .cli_edit import _emit_apply_result
+    return _emit_apply_result(res)
 
 
 def _apply_live(args, pack) -> int:
@@ -215,10 +211,5 @@ def _apply_live(args, pack) -> int:
         _emit(dry_run(plan, ir))
         return 0 if validate(plan, ir).ok else 1
     res = adapter.apply(plan, session)
-    _emit(res.diff)
-    for w in res.warnings:
-        _emit(f"  ⚠ {w}")
-    if not res.ok:
-        _emit("apply failed:\n  " + "\n  ".join(res.errors))
-        return 1
-    return 0
+    from .cli_edit import _emit_apply_result
+    return _emit_apply_result(res)
