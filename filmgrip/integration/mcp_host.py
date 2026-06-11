@@ -70,6 +70,25 @@ def payload_query_clips(ctx: PlannerContext, *, name: Optional[str] = None,
     return {"cols": fgx.COLS, "clips": rows}
 
 
+def payload_get_transcript(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
+                           asr: Optional[str] = None) -> dict:
+    """Word-level transcript phrases for the given clips, keyed by TIMELINE frames.
+
+    Pull-on-demand perception: the planner pays these tokens only when the instruction is
+    about content ("cut the um", "tighten the answer"). Per-clip failures (offline media, no
+    ASR backend, retimed clip) come back in ``errors`` — never fabricated text.
+    """
+    from ..perception.align import transcript_for_clips
+    from ..perception.transcribe import PerceptionUnavailable, detect_backend
+
+    target = ids if ids else list(ctx.selection.ids)
+    try:
+        backend = detect_backend(asr)
+    except PerceptionUnavailable as exc:
+        return {"clips": [], "errors": [str(exc)]}
+    return transcript_for_clips(ctx.ir, target, backend=backend)
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
@@ -98,6 +117,12 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "Speed/visibility: retime sets a clip's speed_percent (200=2x faster, 50=half, negative="
         "reverse, 0=freeze-frame); set_enabled enables/disables a clip without deleting it. retime "
         "warps playback within the clip's existing span — add a ripple if you want the gap closed.\n"
+        "Content: when the instruction is about WHAT IS SAID (umms, filler, 'cut after she says "
+        "X', tightening an answer), call get_transcript(ids) — phrases come back as "
+        "[startFrame-endFrame] lines in timeline frames. ASR timestamps drift 50-100ms: place "
+        "cuts in the silent gaps between phrases, never inside a word, and pad word edges by "
+        "1-5 frames. If get_transcript returns errors (no ASR backend, offline media), say so — "
+        "do not guess content.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 
@@ -209,11 +234,18 @@ def build_mcp_server(ctx: PlannerContext):
     async def query_clips(args):  # pragma: no cover
         return _text(payload_query_clips(ctx, name=args.get("name"), track=args.get("track")))
 
-    return create_sdk_mcp_server("filmgrip", "0.1.0", [get_selection, get_context, query_clips])
+    @tool("get_transcript", "Word-level transcript phrases for clips, in timeline frames "
+          "(use when the edit is about spoken content).",
+          {"ids": list, "asr": str}, read_only)
+    async def get_transcript(args):  # pragma: no cover
+        return _text(payload_get_transcript(ctx, args.get("ids"), asr=args.get("asr")))
+
+    return create_sdk_mcp_server("filmgrip", "0.1.0",
+                                 [get_selection, get_context, query_clips, get_transcript])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
-             "mcp__filmgrip__query_clips"]
+             "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript"]
 
 
 class ClaudeAgentTransport(Transport):

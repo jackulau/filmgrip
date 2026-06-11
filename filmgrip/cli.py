@@ -59,6 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
     pack.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
     pack.add_argument("--out", help="output path for fixture apply (default: <name>.edited.<ext>)")
 
+    tr = sub.add_parser("transcribe", help="word-level transcripts for clips (timeline frames) "
+                                           "or a media file; --srt writes captions")
+    tr.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
+    tr.add_argument("--fixture", help="transcribe clips of a fixture timeline instead of a live editor")
+    tr.add_argument("--media", help="transcribe one media file directly (no editor)")
+    tr.add_argument("--select", help="comma-separated clip IDs (fixture/live; default: selection or all)")
+    tr.add_argument("--srt", help="write an SRT caption file instead of printing phrases")
+    tr.add_argument("--asr", help="ASR backend: faster-whisper | whisper-cpp | elevenlabs "
+                                  "(default: auto-detect, or $FILMGRIP_ASR_BACKEND)")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
@@ -93,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_pack import cmd_pack
 
         return cmd_pack(args)
+    if args.command == "transcribe":
+        from .cli_transcribe import cmd_transcribe
+
+        return cmd_transcribe(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 
