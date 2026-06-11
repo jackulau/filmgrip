@@ -99,10 +99,16 @@ def _apply_fixture(args, pack) -> int:
         return 0 if validate(plan, ir).ok else 1
 
     from .adapters.interchange import InterchangeAdapter
-    from .cli_edit import _emit_apply_result
+    from .cli_edit import _emit_apply_result, run_verify
 
     out = args.out or (os.path.splitext(args.fixture)[0] + ".edited" + os.path.splitext(args.fixture)[1])
     res = InterchangeAdapter().apply(plan, args.fixture, out_path=out)
+    if getattr(args, "verify", False) and res.ok:
+        try:
+            ir_after = load_fixture_ir(out)
+            run_verify(res, ir, plan, ir_after)
+        except Exception as exc:  # verification must never mask the apply result
+            res.warnings.append(f"verify loop failed to run: {exc}")
     return _emit_apply_result(res)
 
 

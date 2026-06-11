@@ -89,20 +89,47 @@ def _emit_apply_result(res) -> int:
     """Render an ApplyResult honestly and map it to the documented exit code.
 
     Always shows what DID apply (``diff``), then ops that couldn't (``✗`` unsupported), then lossy
-    annotations (``⚠`` warnings), then hard failures. Exit: 0 ok · 3 some op unsupported · 1 other.
+    annotations (``⚠`` warnings), then verification proof/divergence lines (``--verify``), then
+    hard failures. Exit: 0 ok · 3 some op unsupported · 1 other (including a verify mismatch).
     A partial apply (some ops landed, some unsupported) is a non-zero exit — film-grip never claims
-    success for an edit it didn't fully perform.
+    success for an edit it didn't fully perform, nor for one it cannot prove landed as planned.
     """
     _emit(res.diff)
     for u in res.unsupported:
         _emit(f"  ✗ {u}")
     for w in res.warnings:
         _emit(f"  ⚠ {w}")
+    for v in getattr(res, "verified", []):
+        _emit(f"  ✓ {v}")
+    for m in getattr(res, "mismatches", []):
+        _emit(f"  ✗ verify mismatch: {m}")
     if res.errors:
         _emit("apply failed:\n  " + "\n  ".join(res.errors))
+    if getattr(res, "mismatches", []):
+        return 1
     if res.ok:
         return 0
     return 3 if res.unsupported and not res.errors else 1
+
+
+def run_verify(res, ir_before, plan, ir_after, *, sheets: bool = True) -> None:
+    """Run the post-apply verification loop and fold the evidence into ``res`` (in place).
+
+    Structural proof lines land in ``res.verified``/``res.mismatches``; boundary contact sheets
+    (when ffmpeg + source media allow) are emitted as extra ``verified`` path lines, and their
+    failures as warnings — a missing sheet is a perception gap, not an apply failure.
+    """
+    from .perception.verify import verify_apply
+
+    report = verify_apply(ir_before, plan, ir_after, sheets=sheets)
+    res.verified.extend(report.verified)
+    res.mismatches.extend(report.mismatches)
+    res.warnings.extend(f"not structurally verifiable: {s} — confirm in the editor"
+                        for s in report.skipped)
+    for sheet in report.sheets:
+        tiles = ", ".join(f"f{e['timeline_frame']}" for e in sheet.legend)
+        res.verified.append(f"boundary sheet {sheet.png_path} [{tiles}]")
+    res.warnings.extend(report.sheet_errors)
 
 
 def cmd_edit(args) -> int:
@@ -151,6 +178,12 @@ def _run_fixture(args) -> int:
         # e.g. Filmora is read-only — say so plainly and use the "unsupported" exit code.
         _emit(f"error: {exc}")
         return 3
+    if getattr(args, "verify", False) and res.ok:
+        try:
+            ir_after = load_fixture_ir(out, adapter)
+            run_verify(res, ir, plan, ir_after)
+        except (FixtureError, Exception) as exc:  # verification must never mask the apply result
+            res.warnings.append(f"verify loop failed to run: {exc}")
     return _emit_apply_result(res)
 
 
@@ -237,6 +270,12 @@ def _run_live(args) -> int:
         return 0 if validate(plan, ir).ok else 1
 
     res = adapter.apply(plan, session)
+    if getattr(args, "verify", False) and res.ok:
+        try:
+            ir_after = adapter.snapshot(session)
+            run_verify(res, ir, plan, ir_after)
+        except Exception as exc:  # verification must never mask the apply result
+            res.warnings.append(f"verify loop failed to run: {exc}")
     return _emit_apply_result(res)
 
 

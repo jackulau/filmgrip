@@ -33,6 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--dry-run", action="store_true",
                       help="validate + print the diff without applying (note: with a prompt and no "
                            "--plan, the planner still makes a billable call to produce the plan)")
+    edit.add_argument("--verify", action="store_true",
+                      help="after applying, re-snapshot and prove the timeline matches the plan "
+                           "(structural diff + boundary contact sheets); mismatch = exit 1")
 
     grab = sub.add_parser(
         "grab",
@@ -58,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     pack.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
     pack.add_argument("--dry-run", action="store_true", help="validate + print the diff without applying")
     pack.add_argument("--out", help="output path for fixture apply (default: <name>.edited.<ext>)")
+    pack.add_argument("--verify", action="store_true",
+                      help="after applying, re-snapshot and prove the timeline matches the plan")
 
     tr = sub.add_parser("transcribe", help="word-level transcripts for clips (timeline frames) "
                                            "or a media file; --srt writes captions")

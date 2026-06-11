@@ -83,6 +83,10 @@ class ApplyResult:
     # round-trip, a bin that fell back to root). The CLI maps a non-empty `unsupported` to exit 3.
     unsupported: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Post-apply verification (filled by the --verify loop, perception.verify): proof lines that
+    # the re-snapshotted timeline matches the simulated expected geometry, and any divergences.
+    verified: list[str] = field(default_factory=list)
+    mismatches: list[str] = field(default_factory=list)
 
 
 class GrabAdapter:
