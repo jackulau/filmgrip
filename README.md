@@ -17,10 +17,15 @@ patch. film-grip's equivalent is **one universal IR + one typed protocol + thin 
   graph. OTIO is the lossless pivot; everything else is a projection of it.
 - **Typed `EditPlan`** — Claude never emits editor-specific code. It proposes bounded, reversible
   primitives that reference **stable clip IDs**. Hallucinated IDs/frames can't survive validation.
-  - *edit / cut*: `trim` · `move` · `insert` · `split` · `ripple` · `delete` (ripple-delete closes the gap) · `retime` (speed up / slow down / reverse / freeze-frame)
+  - *edit / cut*: `trim` · `move` · `insert` · `split` · `cut_range` (carve a frame range out of a clip — the silence/filler primitive) · `ripple` · `delete` (ripple-delete closes the gap) · `retime` (speed up / slow down / reverse / freeze-frame)
   - *audio / SFX*: `import_audio` — drop a sound effect from your library onto an audio track · audio-aware `insert`
   - *organize*: `add_track` · `rename_track` · `create_bin` · `move_to_bin`
   - *annotate / state*: `add_marker` · `set_property` · `set_enabled` (enable / disable a clip without deleting it) · `add_transition`
+  - every op also takes optional `reason` / `quote` rationale — the edit explains itself in the diff and in OTIO metadata
+- **Perception** — the agent can *hear and see* the footage, pull-on-demand: word-level
+  transcripts aligned to **timeline frames** ("cut after she says *perception*"), deterministic
+  silence/filler analysis, ffmpeg contact sheets (filmstrip + waveform), and a post-apply
+  verification loop. See [docs/PERCEPTION.md](docs/PERCEPTION.md).
 - **FGX serializer** — a token-frugal projection (integer frames, abbreviated rows, selected
   subgraph + 1-hop neighbors, media by reference, multi-turn deltas). A selection that is
   multiple kilobytes of raw FCPXML becomes a few hundred tokens.
@@ -60,6 +65,57 @@ reposition clips precisely. So structural edits (`trim`/`move`/`split`/`insert`/
 as a *new* timeline — your original is left untouched. That round-trip is lossy (color grades, Fusion
 comps and some transitions don't carry), and film-grip says so in the apply output rather than
 silently dropping them.
+
+## Perception — the agent hears and sees your footage
+
+Timeline rows tell the planner *where* clips are; perception tells it *what's in them* — with
+your media untouched and every dependency honest (no ASR backend, offline media, no ffmpeg →
+a clear error, never a guess). Word timestamps are the load-bearing data: **the agent greps
+the transcript, it never scrubs the video.**
+
+```bash
+film-grip transcribe                       # word-level phrases, in TIMELINE frames
+film-grip transcribe --srt captions.srt    # caption export (importable into the NLE)
+film-grip pack apply silence-cut --verify  # remove silences + umms — deterministic, no LLM call
+film-grip frames --count 8                 # contact sheet: filmstrip + waveform PNG per clip
+film-grip edit "cut the long pause after she says 'welcome'" --verify
+```
+
+- **Transcripts** (`get_transcript`) — pluggable ASR (faster-whisper / whisper.cpp /
+  ElevenLabs Scribe with diarization), cached per file, packed to ~1/10 the tokens of word
+  JSON, aligned to timeline frames per clip. Retimed clips are refused honestly (a time-warp
+  breaks the mapping).
+- **Speech analysis** (`analyze_speech`, the `silence-cut` pack) — deterministic
+  silence/filler detection that emits ready-to-validate `cut_range` ops, word-snapped and
+  padded 30–200ms for ASR drift. Cutting the umms costs zero model calls.
+- **Looking** (`view_frames`) — a composite contact sheet (filmstrip + waveform + tile→frame
+  legend) rendered from source media, for framing/content/boundary decisions.
+- **Verification** (`--verify`) — after an apply, film-grip simulates the expected timeline
+  (same mutator, on a copy), diffs it against a fresh snapshot (positions, durations, enabled,
+  retime effects — a mismatch is exit 1), and renders boundary sheets ±1.5s around every new
+  cut so the seam is visible. The in-Resolve panel runs the structural check on every apply.
+
+Details: [docs/PERCEPTION.md](docs/PERCEPTION.md).
+
+## vs ffmpeg-pipeline tools (video-use, OpenMontage, …)
+
+Skill-based pipeline tools transcribe → pick ranges → **bake a new mp4**. film-grip borrows
+what they proved (transcript-first perception, drift padding, self-verification) and keeps
+what they can't offer:
+
+| | ffmpeg-pipeline tools | film-grip |
+|---|---|---|
+| Output | re-encoded `final.mp4` (generation loss) | **your real project timeline**, non-destructive |
+| Edit state | an EDL JSON beside a baked file | the NLE project + OTIO IR — still editable by humans |
+| Op vocabulary | keep-ranges (+ global grade/subs) | 17 typed, schema-validated ops |
+| Validation | prose rules the LLM should follow | host-side validator; invalid plans can't apply |
+| Perception | transcript + filmstrip (their win — now here too) | transcript + filmstrip, in timeline frames |
+| Verification | re-watch the rendered file | simulate-and-diff the timeline + boundary sheets |
+| Pro handoff | none (flat file) | Resolve live, FCPXML/AAF/MLT interchange, capability matrix |
+
+If you want a finished mp4 from a folder of takes with no NLE in the loop, those tools are
+great. If the edit must land **in your editor, reversible, with grades/audio/handoff intact**
+— that's film-grip.
 
 ## Sound effects — just tell Claude
 
@@ -146,6 +202,12 @@ film-grip edit "add a blue marker on the selected clip"
 film-grip edit "split the interview at the playhead and tighten the open by 12 frames"
 film-grip edit "add a whoosh when the title flies in, then move the b-roll to v2"
 film-grip edit "make the b-roll 2x faster, reverse the last shot, and disable the second take"
+
+film-grip edit "remove the silences and the umms" --verify   # perception + proof
+
+film-grip transcribe        # word-level transcript of the selection (timeline frames)
+film-grip frames            # contact-sheet PNG (filmstrip + waveform) per selected clip
+film-grip pack apply silence-cut --verify   # deterministic silence/filler removal, no LLM call
 
 film-grip status            # is film-grip able to reach your editor? (the doctor)
 film-grip editors           # per-editor + per-op capability matrix
