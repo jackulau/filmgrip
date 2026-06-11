@@ -170,6 +170,9 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "by 1-5 frames. To LOOK at footage (framing, content, cut boundaries), call "
         "view_frames(ids or frames) and read the returned PNG. If these tools return errors "
         "(no ASR backend, offline media, no ffmpeg), say so — do not guess content.\n"
+        "Rationale: optionally set reason (why this edit) and quote (the spoken words it anchors "
+        "to) on each op — they show up in the diff and are stored on the clip, making the edit "
+        "auditable.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 

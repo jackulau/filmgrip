@@ -21,7 +21,7 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 2  # v2 adds audio (import_audio) + organize (add_track/rename_track/create_bin/move_to_bin)
+SCHEMA_VERSION = 3  # v2 added audio + organize ops; v3 adds cut_range and per-op reason/quote rationale
 
 # Properties an adapter is allowed to set. Anything outside this set is rejected at parse time —
 # Claude cannot invent a destructive or unsupported property key. Adapters map these to their
@@ -59,6 +59,15 @@ AUDIO_PROPS_UNSUPPORTED: frozenset[str] = frozenset({
 
 class _Op(BaseModel):
     model_config = ConfigDict(extra="forbid")  # reject unknown fields -> no smuggled instructions
+
+    # Rationale fields (v3, optional on EVERY op): the edit explains itself. `reason` is why this
+    # op exists; `quote` is the transcript words it anchors to ("cut the um at the top"). They ride
+    # along into dry-run diffs and OTIO metadata, making a plan auditable text a reviewer can read —
+    # and costing zero tokens when omitted.
+    reason: str = Field(default="", max_length=200,
+                        description="why this edit (optional; shown in diffs and stored on the clip)")
+    quote: str = Field(default="", max_length=200,
+                       description="the spoken words this op anchors to (optional)")
 
 
 class Trim(_Op):

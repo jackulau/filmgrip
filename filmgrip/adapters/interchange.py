@@ -83,7 +83,27 @@ class OtioMutator:
                                    f"editor (e.g. add a transition in the NLE)")
                 continue
             applied.append(getattr(self, f"_{op.op}")(op))
+            self._attach_rationale(op)
         return applied, unsupported
+
+    def _attach_rationale(self, op) -> None:
+        """Persist the op's reason/quote (v3 rationale fields) onto the surviving clip's OTIO
+        metadata, so the edit stays auditable in the project file itself. Ops that remove the
+        clip (or target no clip) have nowhere to write — skipped."""
+        reason = getattr(op, "reason", "")
+        quote = getattr(op, "quote", "")
+        if not (reason or quote) or op.op == "delete":
+            return
+        clip = self.ir.clip(getattr(op, "clip_id", "") or "")
+        if clip is None or clip.otio is None or clip.otio.parent() is None:
+            return
+        entry = {"op": op.op}
+        if reason:
+            entry["reason"] = reason
+        if quote:
+            entry["quote"] = quote
+        log = clip.otio.metadata.setdefault("filmgrip", {}).setdefault("rationale", [])
+        log.append(entry)
 
     def _clip_and_item(self, op):
         clip = self.ir.clip(op.clip_id)

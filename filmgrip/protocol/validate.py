@@ -285,7 +285,12 @@ def dry_run(plan: EditPlan, ir: TimelineIR) -> str:
 
     lines.append(f"PLAN OK — {len(plan.ops)} op(s):")
     for op in plan.ops:
-        lines.append("  ✓ " + _describe(op, ir))
+        desc = _describe(op, ir)
+        if getattr(op, "quote", ""):
+            desc += f' "{op.quote}"'
+        if getattr(op, "reason", ""):
+            desc += f" — {op.reason}"
+        lines.append("  ✓ " + desc)
     if res.warnings:
         lines.append(f"  ({len(res.warnings)} warning(s))")
         lines.extend(f"    ⚠ {w}" for w in res.warnings)
