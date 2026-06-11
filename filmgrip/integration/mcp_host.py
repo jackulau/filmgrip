@@ -104,6 +104,33 @@ def payload_analyze_speech(ctx: PlannerContext, ids: Optional[list[str]] = None,
                          min_silence_s=max(0.05, min_silence_ms / 1000.0))
 
 
+def payload_view_frames(ctx: PlannerContext, ids: Optional[list[str]] = None,
+                        frames: Optional[list[int]] = None, *, count: int = 8) -> dict:
+    """Contact-sheet PNGs (filmstrip + waveform) for clips or exact timeline frames.
+
+    Returns file paths + a tile legend; the caller reads the PNG multimodally. Source-media
+    based — film-grip never renders/exports to look at the timeline.
+    """
+    from ..perception.frames import clip_sheet, timeline_sheet
+    from ..perception.transcribe import PerceptionUnavailable
+
+    sheets, errors = [], []
+    if frames:
+        results, errors = timeline_sheet(ctx.ir, [int(f) for f in frames])
+        sheets = list(results)
+    else:
+        target = ids if ids else list(ctx.selection.ids)
+        for cid in target:
+            try:
+                sheets.append(clip_sheet(ctx.ir, cid, count=count))
+            except PerceptionUnavailable as exc:
+                errors.append(str(exc))
+    return {
+        "sheets": [{"png": s.png_path, "legend": s.legend, "notes": s.notes} for s in sheets],
+        "errors": errors,
+    }
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
@@ -140,8 +167,9 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "removes [start_frame,end_frame) from inside ONE clip (ripple=true closes the hole); "
         "order rippling cut_ranges on a track LAST-TO-FIRST. ASR timestamps drift 50-100ms: "
         "place cuts in the silent gaps between phrases, never inside a word, and pad word edges "
-        "by 1-5 frames. If these tools return errors (no ASR backend, offline media), say so — "
-        "do not guess content.\n"
+        "by 1-5 frames. To LOOK at footage (framing, content, cut boundaries), call "
+        "view_frames(ids or frames) and read the returned PNG. If these tools return errors "
+        "(no ASR backend, offline media, no ffmpeg), say so — do not guess content.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 
@@ -267,14 +295,21 @@ def build_mcp_server(ctx: PlannerContext):
             ctx, args.get("ids"), min_silence_ms=int(args.get("min_silence_ms", 400)),
             asr=args.get("asr")))
 
+    @tool("view_frames", "Render a contact-sheet PNG (filmstrip + waveform) for clips or exact "
+          "timeline frames; returns the PNG path + tile legend — read the PNG to actually look.",
+          {"ids": list, "frames": list, "count": int}, read_only)
+    async def view_frames(args):  # pragma: no cover
+        return _text(payload_view_frames(ctx, args.get("ids"), args.get("frames"),
+                                         count=int(args.get("count", 8))))
+
     return create_sdk_mcp_server("filmgrip", "0.1.0",
                                  [get_selection, get_context, query_clips, get_transcript,
-                                  analyze_speech])
+                                  analyze_speech, view_frames])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
              "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript",
-             "mcp__filmgrip__analyze_speech"]
+             "mcp__filmgrip__analyze_speech", "mcp__filmgrip__view_frames"]
 
 
 class ClaudeAgentTransport(Transport):

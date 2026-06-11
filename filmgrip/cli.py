@@ -69,6 +69,16 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--asr", help="ASR backend: faster-whisper | whisper-cpp | elevenlabs "
                                   "(default: auto-detect, or $FILMGRIP_ASR_BACKEND)")
 
+    fr = sub.add_parser("frames", help="render a contact-sheet PNG (filmstrip + waveform) for "
+                                       "clips or exact timeline frames")
+    fr.add_argument("--editor", default="resolve", help="target editor (default: resolve)")
+    fr.add_argument("--fixture", help="render from a fixture timeline instead of a live editor")
+    fr.add_argument("--select", help="comma-separated clip IDs (default: selection or all)")
+    fr.add_argument("--at", help="comma-separated absolute timeline frames (instead of per-clip "
+                                 "sampling)")
+    fr.add_argument("--count", type=int, default=8, help="tiles per clip sheet (default 8)")
+    fr.add_argument("--out", help="copy the (single) resulting sheet to this path")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
@@ -107,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_transcribe import cmd_transcribe
 
         return cmd_transcribe(args)
+    if args.command == "frames":
+        from .cli_frames import cmd_frames
+
+        return cmd_frames(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 
