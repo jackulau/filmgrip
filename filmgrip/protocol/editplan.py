@@ -21,7 +21,7 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 2  # v2 adds audio (import_audio) + organize (add_track/rename_track/create_bin/move_to_bin)
+SCHEMA_VERSION = 3  # v2 added audio + organize ops; v3 adds cut_range and per-op reason/quote rationale
 
 # Properties an adapter is allowed to set. Anything outside this set is rejected at parse time —
 # Claude cannot invent a destructive or unsupported property key. Adapters map these to their
@@ -59,6 +59,15 @@ AUDIO_PROPS_UNSUPPORTED: frozenset[str] = frozenset({
 
 class _Op(BaseModel):
     model_config = ConfigDict(extra="forbid")  # reject unknown fields -> no smuggled instructions
+
+    # Rationale fields (v3, optional on EVERY op): the edit explains itself. `reason` is why this
+    # op exists; `quote` is the transcript words it anchors to ("cut the um at the top"). They ride
+    # along into dry-run diffs and OTIO metadata, making a plan auditable text a reviewer can read —
+    # and costing zero tokens when omitted.
+    reason: str = Field(default="", max_length=200,
+                        description="why this edit (optional; shown in diffs and stored on the clip)")
+    quote: str = Field(default="", max_length=200,
+                       description="the spoken words this op anchors to (optional)")
 
 
 class Trim(_Op):
@@ -224,10 +233,63 @@ class MoveToBin(_Op):
     bin: str = Field(min_length=1, max_length=120, description="destination bin name")
 
 
+class Retime(_Op):
+    """Change a clip's playback speed — the real retime primitive, via an OTIO time-warp effect.
+
+    ``speed_percent`` is a percentage of normal speed: 100 = normal, 200 = 2× faster, 50 = half
+    speed, a negative value plays in reverse (e.g. -100 = reverse at normal speed), and 0 = a
+    freeze-frame. It maps to an ``otio.schema.LinearTimeWarp`` (``FreezeFrame`` at 0) on the clip,
+    which the OTIO-rebuild path carries — so it lands on every rebuild/interchange editor and in
+    Resolve via the rebuild. The warp changes how the source plays *within* the clip's existing
+    timeline span; it does not move neighbours (re-ripple separately if you want the gap closed).
+    """
+    op: Literal["retime"] = "retime"
+    clip_id: str
+    speed_percent: float = Field(
+        default=100.0, ge=-10000.0, le=10000.0,
+        description="100=normal, 200=2x faster, 50=half speed, negative=reverse, 0=freeze-frame")
+
+
+class SetEnabled(_Op):
+    """Enable or disable a clip without removing it (a disabled clip stays on the timeline but is
+    skipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO
+    rebuild (the clip's ``enabled`` flag)."""
+    op: Literal["set_enabled"] = "set_enabled"
+    clip_id: str
+    enabled: bool = Field(description="True = enable the clip, False = disable (mute) it")
+
+
+class CutRange(_Op):
+    """Remove the timeline frame range ``[start_frame, end_frame)`` from inside one clip — the
+    silence/filler-removal primitive.
+
+    Atomic split+split+delete that stays addressable: it references the ORIGINAL clip id and
+    absolute timeline frames, so one plan can carve several ranges out of one clip (a chain of
+    ``split`` ops can't — the middle piece's id doesn't exist until after apply). ``ripple=True``
+    closes the hole (everything later on the track shifts left); ``False`` leaves a gap.
+
+    Ordering contract (validated): when ``ripple=True``, cut_range ops on the SAME track must be
+    ordered last-to-first (descending ``start_frame``) so earlier ranges aren't shifted by the
+    time they apply.
+    """
+    op: Literal["cut_range"] = "cut_range"
+    clip_id: str
+    start_frame: int = Field(ge=0, description="absolute timeline frame the cut starts at")
+    end_frame: int = Field(gt=0, description="absolute timeline frame the cut ends before")
+    ripple: bool = Field(default=True, description="True = close the hole; False = leave a gap")
+
+    @model_validator(mode="after")
+    def _range_is_forward(self) -> "CutRange":
+        if self.end_frame <= self.start_frame:
+            raise ValueError(
+                f"cut_range needs start_frame < end_frame (got {self.start_frame}..{self.end_frame})")
+        return self
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
-        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin,
+        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
     ],
     Field(discriminator="op"),
 ]

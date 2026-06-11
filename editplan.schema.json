@@ -4,6 +4,20 @@
       "additionalProperties": false,
       "description": "Add a marker. ``frame`` is an offset within the clip (0 = clip start).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "add_marker",
           "default": "add_marker",
@@ -52,6 +66,20 @@
       "additionalProperties": false,
       "description": "Add a new track to the timeline (organizing primitive).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "add_track",
           "default": "add_track",
@@ -82,6 +110,20 @@
       "additionalProperties": false,
       "description": "Add a transition on a clip edge (e.g. a cross dissolve at the 'in' edge).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "add_transition",
           "default": "add_transition",
@@ -123,6 +165,20 @@
       "additionalProperties": false,
       "description": "Create a media-pool bin/folder (organizing primitive).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "create_bin",
           "default": "create_bin",
@@ -148,9 +204,78 @@
       "title": "CreateBin",
       "type": "object"
     },
+    "CutRange": {
+      "additionalProperties": false,
+      "description": "Remove the timeline frame range ``[start_frame, end_frame)`` from inside one clip \u2014 the\nsilence/filler-removal primitive.\n\nAtomic split+split+delete that stays addressable: it references the ORIGINAL clip id and\nabsolute timeline frames, so one plan can carve several ranges out of one clip (a chain of\n``split`` ops can't \u2014 the middle piece's id doesn't exist until after apply). ``ripple=True``\ncloses the hole (everything later on the track shifts left); ``False`` leaves a gap.\n\nOrdering contract (validated): when ``ripple=True``, cut_range ops on the SAME track must be\nordered last-to-first (descending ``start_frame``) so earlier ranges aren't shifted by the\ntime they apply.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "cut_range",
+          "default": "cut_range",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "start_frame": {
+          "description": "absolute timeline frame the cut starts at",
+          "minimum": 0,
+          "title": "Start Frame",
+          "type": "integer"
+        },
+        "end_frame": {
+          "description": "absolute timeline frame the cut ends before",
+          "exclusiveMinimum": 0,
+          "title": "End Frame",
+          "type": "integer"
+        },
+        "ripple": {
+          "default": true,
+          "description": "True = close the hole; False = leave a gap",
+          "title": "Ripple",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clip_id",
+        "start_frame",
+        "end_frame"
+      ],
+      "title": "CutRange",
+      "type": "object"
+    },
     "Delete": {
       "additionalProperties": false,
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "delete",
           "default": "delete",
@@ -178,6 +303,20 @@
       "additionalProperties": false,
       "description": "Import a sound effect / audio file and place it on an audio track.\n\nReference the effect by ``sfx`` (a name in the user's SFX library) OR ``src_ref`` (an explicit\naudio file path). The host resolves ``sfx`` \u2192 a real path via the SFX library, imports it into the\nproject's media pool, and lands it on ``track`` at ``at_start``.\n\nHonest limitation: per-clip volume/gain/fades are NOT settable via Resolve scripting (Fairlight\nonly). This op *places* audio; level/fade tweaks stay a manual step \u2014 see ``AUDIO_PROPS_UNSUPPORTED``.",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "import_audio",
           "default": "import_audio",
@@ -240,6 +379,20 @@
       "additionalProperties": false,
       "description": "Insert a media reference as a new clip on a track at a timeline frame.",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "insert",
           "default": "insert",
@@ -297,6 +450,20 @@
       "additionalProperties": false,
       "description": "Move a clip to a new timeline start frame, optionally to another track.",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "move",
           "default": "move",
@@ -338,6 +505,20 @@
       "additionalProperties": false,
       "description": "Move a clip's source media into a media-pool bin (organizing primitive).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "move_to_bin",
           "default": "move_to_bin",
@@ -367,6 +548,20 @@
       "additionalProperties": false,
       "description": "Rename an existing track (organizing primitive).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "rename_track",
           "default": "rename_track",
@@ -392,10 +587,67 @@
       "title": "RenameTrack",
       "type": "object"
     },
+    "Retime": {
+      "additionalProperties": false,
+      "description": "Change a clip's playback speed \u2014 the real retime primitive, via an OTIO time-warp effect.\n\n``speed_percent`` is a percentage of normal speed: 100 = normal, 200 = 2\u00d7 faster, 50 = half\nspeed, a negative value plays in reverse (e.g. -100 = reverse at normal speed), and 0 = a\nfreeze-frame. It maps to an ``otio.schema.LinearTimeWarp`` (``FreezeFrame`` at 0) on the clip,\nwhich the OTIO-rebuild path carries \u2014 so it lands on every rebuild/interchange editor and in\nResolve via the rebuild. The warp changes how the source plays *within* the clip's existing\ntimeline span; it does not move neighbours (re-ripple separately if you want the gap closed).",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "retime",
+          "default": "retime",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "speed_percent": {
+          "default": 100.0,
+          "description": "100=normal, 200=2x faster, 50=half speed, negative=reverse, 0=freeze-frame",
+          "maximum": 10000.0,
+          "minimum": -10000.0,
+          "title": "Speed Percent",
+          "type": "number"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "Retime",
+      "type": "object"
+    },
     "Ripple": {
       "additionalProperties": false,
       "description": "Shift every clip at/after ``from_frame`` on a track by ``delta`` frames.",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "ripple",
           "default": "ripple",
@@ -432,9 +684,64 @@
       "title": "Ripple",
       "type": "object"
     },
+    "SetEnabled": {
+      "additionalProperties": false,
+      "description": "Enable or disable a clip without removing it (a disabled clip stays on the timeline but is\nskipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO\nrebuild (the clip's ``enabled`` flag).",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "set_enabled",
+          "default": "set_enabled",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "True = enable the clip, False = disable (mute) it",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clip_id",
+        "enabled"
+      ],
+      "title": "SetEnabled",
+      "type": "object"
+    },
     "SetProperty": {
       "additionalProperties": false,
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "set_property",
           "default": "set_property",
@@ -479,6 +786,20 @@
       "additionalProperties": false,
       "description": "Split a clip into two at a timeline frame inside it.",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "split",
           "default": "split",
@@ -507,6 +828,20 @@
       "additionalProperties": false,
       "description": "Adjust a clip's in- or out-point by ``delta`` frames (negative = shorten/move earlier).",
       "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
         "op": {
           "const": "trim",
           "default": "trim",
@@ -544,7 +879,7 @@
   "description": "An ordered list of typed ops plus an optional one-line rationale.",
   "properties": {
     "version": {
-      "default": 2,
+      "default": 3,
       "title": "Version",
       "type": "integer"
     },
@@ -563,13 +898,16 @@
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
             "create_bin": "#/$defs/CreateBin",
+            "cut_range": "#/$defs/CutRange",
             "delete": "#/$defs/Delete",
             "import_audio": "#/$defs/ImportAudio",
             "insert": "#/$defs/Insert",
             "move": "#/$defs/Move",
             "move_to_bin": "#/$defs/MoveToBin",
             "rename_track": "#/$defs/RenameTrack",
+            "retime": "#/$defs/Retime",
             "ripple": "#/$defs/Ripple",
+            "set_enabled": "#/$defs/SetEnabled",
             "set_property": "#/$defs/SetProperty",
             "split": "#/$defs/Split",
             "trim": "#/$defs/Trim"
@@ -618,6 +956,15 @@
           },
           {
             "$ref": "#/$defs/MoveToBin"
+          },
+          {
+            "$ref": "#/$defs/Retime"
+          },
+          {
+            "$ref": "#/$defs/SetEnabled"
+          },
+          {
+            "$ref": "#/$defs/CutRange"
           }
         ]
       },

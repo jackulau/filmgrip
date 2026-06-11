@@ -183,3 +183,33 @@ def test_on_copy_grab_exception_does_not_crash():
 
     res = PanelController(lambda p, d: PanelResult(True, ""), grab_context=boom).on_copy()
     assert res.ok is False and "snapshot failed" in res.text
+
+
+# -- apply-result rendering in the panel (honest unsupported surfacing) ------
+def test_format_apply_body_surfaces_unsupported():
+    # The panel must show WHICH op had no path (✗), not hide it behind a bare "apply failed".
+    from filmgrip.adapters.base import ApplyResult
+    from filmgrip.ui.panel import format_apply_body
+
+    res = ApplyResult(ok=False, diff="  (no applicable ops)",
+                      unsupported=["op 'add_transition' has no live or rebuild path in Resolve"])
+    body = format_apply_body(res)
+    assert "✗" in body and "add_transition" in body
+
+
+def test_format_apply_body_shows_diff_and_warnings_on_success():
+    from filmgrip.adapters.base import ApplyResult
+    from filmgrip.ui.panel import format_apply_body
+
+    res = ApplyResult(ok=True, diff="  ✓ trim shotB out -20", warnings=["applied via OTIO rebuild (lossy)"])
+    body = format_apply_body(res)
+    assert "✓ trim shotB" in body and "⚠" in body and "lossy" in body
+
+
+def test_format_apply_body_shows_errors():
+    from filmgrip.adapters.base import ApplyResult
+    from filmgrip.ui.panel import format_apply_body
+
+    res = ApplyResult(ok=False, errors=["cannot write cmx_3600: single track only"])
+    body = format_apply_body(res)
+    assert "apply failed" in body and "cmx_3600" in body

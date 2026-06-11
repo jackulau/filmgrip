@@ -132,8 +132,8 @@ def features_markdown() -> str:
 # the schema (filmgrip.protocol.editplan.all_op_names) by the honesty gate, so no op can be silently
 # dropped or mislabelled.
 _OP_DISPLAY_ORDER = (
-    "trim", "move", "split", "insert", "ripple", "delete",
-    "add_marker", "set_property", "add_transition",
+    "trim", "move", "split", "cut_range", "insert", "ripple", "delete", "retime",
+    "add_marker", "set_property", "set_enabled", "add_transition",
     "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
 )
 

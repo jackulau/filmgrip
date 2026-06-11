@@ -108,3 +108,15 @@ def test_dry_run_reads_like_a_diff(cut):
     assert "trim intro out -12" in diff
     assert "0..48 ⇒ 0..36" in diff
     assert "marker Red on intro" in diff
+
+
+def test_dry_run_shows_rationale(cut):
+    """v3: reason/quote ride along into the human-readable diff."""
+    cid = cut.real_clips()[0].id
+    plan = EditPlan.parse({"ops": [
+        {"op": "trim", "clip_id": cid, "edge": "in", "delta": 5,
+         "reason": "tighten the open", "quote": "Hey everyone"},
+    ]})
+    text = V.dry_run(plan, cut)
+    assert '"Hey everyone"' in text
+    assert "— tighten the open" in text

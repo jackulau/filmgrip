@@ -101,3 +101,26 @@ def test_cli_pack_apply_writes_edited_file(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert (tmp_path / "cut.edited.otio").is_file()
+
+
+def test_cli_pack_apply_surfaces_unsupported_with_exit_3(monkeypatch, tmp_path, capsys):
+    # If a pack-apply ever yields an unsupported op, the CLI must print the ✗ reason and exit 3
+    # (the documented "unsupported" code) — exactly like `film-grip edit`. Before this fix the pack
+    # path swallowed `res.unsupported` and returned a bare exit 1. (Built-in packs never emit an
+    # unsupported op, so we force the adapter to return one to prove the wiring is honest.)
+    import shutil
+
+    from filmgrip.adapters import interchange
+    from filmgrip.adapters.base import ApplyResult
+
+    def fake_apply(self, plan, source, **kw):
+        return ApplyResult(ok=False, diff="  (no applicable ops)",
+                           unsupported=["op 'add_transition' has no interchange/rebuild path"])
+
+    monkeypatch.setattr(interchange.InterchangeAdapter, "apply", fake_apply)
+    src = tmp_path / "cut.otio"
+    shutil.copy(FIX, src)
+    code = main(["pack", "apply", "marker-pass", "--fixture", str(src)])
+    out = capsys.readouterr().out
+    assert code == 3                              # unsupported → exit 3, not a generic 1
+    assert "✗" in out and "add_transition" in out  # the specific reason is visible

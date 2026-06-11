@@ -79,6 +79,24 @@ class PanelResult:
     text: str
 
 
+def format_apply_body(res) -> str:
+    """Render an :class:`~filmgrip.adapters.base.ApplyResult` for the panel's output area, honestly.
+
+    Shows what DID apply (``diff``), then ops that could NOT (``✗`` unsupported), then lossy notes
+    (``⚠`` warnings), then hard errors. Mirrors the CLI's ``_emit_apply_result`` so the in-Resolve
+    panel never hides an unsupported op behind a bare "apply failed" — the user sees exactly which
+    op had no path, the same as on the command line.
+    """
+    parts: list[str] = [res.diff] if res.diff else []
+    parts += [f"  ✗ {u}" for u in res.unsupported]
+    parts += [f"  ⚠ {w}" for w in res.warnings]
+    parts += [f"  ✓ {v}" for v in getattr(res, "verified", [])]
+    parts += [f"  ✗ verify mismatch: {m}" for m in getattr(res, "mismatches", [])]
+    if res.errors:
+        parts.append("apply failed:\n  " + "\n  ".join(res.errors))
+    return "\n".join(parts) if parts else ("ok" if res.ok else "apply failed")
+
+
 # run_edit(prompt, dry_run) -> PanelResult : the edit seam. grab_context() -> str : the capture
 # seam (the <selected_clips> block for Copy-context). The live factory below wires both to the real
 # pipeline; tests inject fakes.
@@ -187,9 +205,16 @@ def live_controller(session, *, adapter=None) -> PanelController:
         if dry_run:
             return PanelResult(True, render_dry_run(result.plan, cur_ir))
         res = adapter.apply(result.plan, session)
-        body = res.diff if res.ok else ("apply failed:\n  " + "\n  ".join(res.errors))
-        if res.warnings:
-            body += "\n  ⚠ " + "\n  ⚠ ".join(res.warnings)
-        return PanelResult(res.ok, body)
+        if res.ok:
+            # Structural verify (cheap: snapshot + simulate + diff); sheets stay CLI-only so the
+            # panel keeps its tight feedback loop. A mismatch is shown, and flips ok to False.
+            try:
+                from ..cli_edit import run_verify
+
+                run_verify(res, cur_ir, result.plan, adapter.snapshot(session), sheets=False)
+            except Exception as exc:  # verification must never crash the panel
+                res.warnings.append(f"verify loop failed to run: {exc}")
+        panel_ok = res.ok and not res.mismatches
+        return PanelResult(panel_ok, format_apply_body(res))
 
     return PanelController(run_edit, selection_summary=summary, grab_context=grab_context)

@@ -22,11 +22,14 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | trim | rebuild | yes | yes |
 | move | rebuild | yes | yes |
 | split | rebuild | yes | yes |
+| cut_range | rebuild | yes | yes |
 | insert | rebuild | yes | yes |
 | ripple | rebuild | yes | yes |
 | delete | yes | yes | yes |
+| retime | rebuild | yes | yes |
 | add_marker | yes | yes | yes |
 | set_property | yes | yes | yes (metadata) |
+| set_enabled | yes | yes | yes |
 | add_transition | no | no | no (do in editor) |
 | import_audio | yes | n/a | no |
 | add_track | yes | n/a | no |

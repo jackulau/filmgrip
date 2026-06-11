@@ -89,3 +89,57 @@ def test_repo_schema_file_is_current():
     repo_schema = ROOT / "editplan.schema.json"
     assert repo_schema.exists(), "run python -m filmgrip.protocol.editplan to generate it"
     assert json.loads(repo_schema.read_text()) == ep.schema()
+
+
+# --------------------------------------------------------------------------- v3 rationale
+def test_every_op_accepts_reason_and_quote():
+    """v3: rationale fields are optional on EVERY op and default to empty."""
+    plan = ep.EditPlan.parse({"ops": [
+        {"op": "trim", "clip_id": "c1", "edge": "in", "delta": 5,
+         "reason": "tighten the open", "quote": "Hey everyone"},
+        {"op": "cut_range", "clip_id": "c1", "start_frame": 10, "end_frame": 20,
+         "reason": "remove the um"},
+        {"op": "add_marker", "clip_id": "c1"},
+    ]})
+    assert plan.ops[0].reason == "tighten the open"
+    assert plan.ops[0].quote == "Hey everyone"
+    assert plan.ops[1].quote == ""
+    assert plan.ops[2].reason == ""
+
+
+def test_rationale_length_is_bounded():
+    import pytest
+
+    with pytest.raises(Exception):
+        ep.EditPlan.parse({"ops": [{"op": "delete", "clip_id": "c1", "reason": "x" * 300}]})
+
+
+def test_schema_exposes_rationale_fields():
+    doc = ep.schema()
+    trim = doc["$defs"]["Trim"]["properties"]
+    assert "reason" in trim and "quote" in trim
+
+
+def test_rationale_lands_in_otio_metadata_on_rebuild_apply():
+    import opentimelineio as otio
+
+    from filmgrip.adapters.interchange import OtioMutator
+    from filmgrip.core.ir import TimelineIR
+
+    rt = lambda f: otio.opentime.RationalTime(f, 24)
+    tl = otio.schema.Timeline(name="t")
+    track = otio.schema.Track(kind=otio.schema.TrackKind.Video)
+    tl.tracks.append(track)
+    track.append(otio.schema.Clip(
+        name="a", media_reference=otio.schema.ExternalReference(target_url="/a.mov"),
+        source_range=otio.opentime.TimeRange(rt(0), rt(480))))
+    ir = TimelineIR(tl)
+    cid = ir.real_clips()[0].id
+    plan = ep.EditPlan.parse({"ops": [
+        {"op": "cut_range", "clip_id": cid, "start_frame": 100, "end_frame": 148,
+         "reason": "remove the um", "quote": "um"},
+    ]})
+    OtioMutator(ir).apply(plan)
+    ir.reindex()
+    log = ir.real_clips()[0].otio.metadata["filmgrip"]["rationale"]
+    assert dict(log[0]) == {"op": "cut_range", "reason": "remove the um", "quote": "um"}

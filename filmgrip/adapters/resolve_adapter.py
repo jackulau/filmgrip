@@ -35,7 +35,7 @@ from .resolve_client import (
 # move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
-LIVE_OPS = frozenset({"add_marker", "set_property", "delete"})
+LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled"})
 
 # Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
@@ -506,6 +506,15 @@ class ResolveAdapter(GrabAdapter):
                     f"SetProperty {op.key} failed on '{clip.name}'")
             return (f"set {clip.name}.{op.key} = {op.value!r}",
                     lambda: _native_call(item, "SetProperty", op.key, old), None)
+
+        if op.op == "set_enabled":
+            old = item.GetClipEnabled() if hasattr(item, "GetClipEnabled") else None
+            require(_native_call(item, "SetClipEnabled", bool(op.enabled)),
+                    f"SetClipEnabled failed on '{clip.name}'")
+            inverse = ((lambda: _native_call(item, "SetClipEnabled", bool(old)))
+                       if old is not None else
+                       (lambda: _native_call(item, "SetClipEnabled", True)))
+            return (f"{'enable' if op.enabled else 'disable'} {clip.name}", inverse, None)
 
         if op.op == "delete":
             require(timeline, "no timeline handle for delete")

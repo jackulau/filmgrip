@@ -70,11 +70,73 @@ def payload_query_clips(ctx: PlannerContext, *, name: Optional[str] = None,
     return {"cols": fgx.COLS, "clips": rows}
 
 
+def payload_get_transcript(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
+                           asr: Optional[str] = None) -> dict:
+    """Word-level transcript phrases for the given clips, keyed by TIMELINE frames.
+
+    Pull-on-demand perception: the planner pays these tokens only when the instruction is
+    about content ("cut the um", "tighten the answer"). Per-clip failures (offline media, no
+    ASR backend, retimed clip) come back in ``errors`` — never fabricated text.
+    """
+    from ..perception.align import transcript_for_clips
+    from ..perception.transcribe import PerceptionUnavailable, detect_backend
+
+    target = ids if ids else list(ctx.selection.ids)
+    try:
+        backend = detect_backend(asr)
+    except PerceptionUnavailable as exc:
+        return {"clips": [], "errors": [str(exc)]}
+    return transcript_for_clips(ctx.ir, target, backend=backend)
+
+
+def payload_analyze_speech(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
+                           min_silence_ms: int = 400, asr: Optional[str] = None) -> dict:
+    """Deterministic silence/filler analysis + ready-to-apply ``cut_range`` candidates."""
+    from ..perception.speech import analyze_clips
+    from ..perception.transcribe import PerceptionUnavailable, detect_backend
+
+    target = ids if ids else list(ctx.selection.ids)
+    try:
+        backend = detect_backend(asr)
+    except PerceptionUnavailable as exc:
+        return {"clips": [], "candidates": [], "errors": [str(exc)]}
+    return analyze_clips(ctx.ir, target, backend=backend,
+                         min_silence_s=max(0.05, min_silence_ms / 1000.0))
+
+
+def payload_view_frames(ctx: PlannerContext, ids: Optional[list[str]] = None,
+                        frames: Optional[list[int]] = None, *, count: int = 8) -> dict:
+    """Contact-sheet PNGs (filmstrip + waveform) for clips or exact timeline frames.
+
+    Returns file paths + a tile legend; the caller reads the PNG multimodally. Source-media
+    based — film-grip never renders/exports to look at the timeline.
+    """
+    from ..perception.frames import clip_sheet, timeline_sheet
+    from ..perception.transcribe import PerceptionUnavailable
+
+    sheets, errors = [], []
+    if frames:
+        results, errors = timeline_sheet(ctx.ir, [int(f) for f in frames])
+        sheets = list(results)
+    else:
+        target = ids if ids else list(ctx.selection.ids)
+        for cid in target:
+            try:
+                sheets.append(clip_sheet(ctx.ir, cid, count=count))
+            except PerceptionUnavailable as exc:
+                errors.append(str(exc))
+    return {
+        "sheets": [{"png": s.png_path, "legend": s.legend, "notes": s.notes} for s in sheets],
+        "errors": errors,
+    }
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
-    ops = ("trim, move, insert, delete, set_property, add_marker, add_transition, split, ripple, "
-           "import_audio, add_track, rename_track, create_bin, move_to_bin")
+    ops = ("trim, move, insert, delete, set_property, set_enabled, add_marker, add_transition, "
+           "split, ripple, retime, cut_range, import_audio, add_track, rename_track, create_bin, "
+           "move_to_bin")
     props = ", ".join(sorted(ep.ALLOWED_PROPERTIES))
     no_audio = ", ".join(sorted(ep.AUDIO_PROPS_UNSUPPORTED))
     return (
@@ -95,6 +157,22 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "step.\n"
         "Organizing: add_track / rename_track / create_bin / move_to_bin tidy tracks and media-pool "
         "bins.\n"
+        "Speed/visibility: retime sets a clip's speed_percent (200=2x faster, 50=half, negative="
+        "reverse, 0=freeze-frame); set_enabled enables/disables a clip without deleting it. retime "
+        "warps playback within the clip's existing span — add a ripple if you want the gap closed.\n"
+        "Content: when the instruction is about WHAT IS SAID (umms, filler, 'cut after she says "
+        "X', tightening an answer), call get_transcript(ids) — phrases come back as "
+        "[startFrame-endFrame] lines in timeline frames. For 'remove silences/fillers/tighten', "
+        "call analyze_speech(ids) and reuse its ready-made cut_range candidates. cut_range "
+        "removes [start_frame,end_frame) from inside ONE clip (ripple=true closes the hole); "
+        "order rippling cut_ranges on a track LAST-TO-FIRST. ASR timestamps drift 50-100ms: "
+        "place cuts in the silent gaps between phrases, never inside a word, and pad word edges "
+        "by 1-5 frames. To LOOK at footage (framing, content, cut boundaries), call "
+        "view_frames(ids or frames) and read the returned PNG. If these tools return errors "
+        "(no ASR backend, offline media, no ffmpeg), say so — do not guess content.\n"
+        "Rationale: optionally set reason (why this edit) and quote (the spoken words it anchors "
+        "to) on each op — they show up in the diff and are stored on the clip, making the edit "
+        "auditable.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
 
@@ -206,11 +284,35 @@ def build_mcp_server(ctx: PlannerContext):
     async def query_clips(args):  # pragma: no cover
         return _text(payload_query_clips(ctx, name=args.get("name"), track=args.get("track")))
 
-    return create_sdk_mcp_server("filmgrip", "0.1.0", [get_selection, get_context, query_clips])
+    @tool("get_transcript", "Word-level transcript phrases for clips, in timeline frames "
+          "(use when the edit is about spoken content).",
+          {"ids": list, "asr": str}, read_only)
+    async def get_transcript(args):  # pragma: no cover
+        return _text(payload_get_transcript(ctx, args.get("ids"), asr=args.get("asr")))
+
+    @tool("analyze_speech", "Silence/filler analysis with ready-to-apply cut_range candidates "
+          "(use for 'remove silences', 'cut the umms', 'tighten this').",
+          {"ids": list, "min_silence_ms": int, "asr": str}, read_only)
+    async def analyze_speech(args):  # pragma: no cover
+        return _text(payload_analyze_speech(
+            ctx, args.get("ids"), min_silence_ms=int(args.get("min_silence_ms", 400)),
+            asr=args.get("asr")))
+
+    @tool("view_frames", "Render a contact-sheet PNG (filmstrip + waveform) for clips or exact "
+          "timeline frames; returns the PNG path + tile legend — read the PNG to actually look.",
+          {"ids": list, "frames": list, "count": int}, read_only)
+    async def view_frames(args):  # pragma: no cover
+        return _text(payload_view_frames(ctx, args.get("ids"), args.get("frames"),
+                                         count=int(args.get("count", 8))))
+
+    return create_sdk_mcp_server("filmgrip", "0.1.0",
+                                 [get_selection, get_context, query_clips, get_transcript,
+                                  analyze_speech, view_frames])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
-             "mcp__filmgrip__query_clips"]
+             "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript",
+             "mcp__filmgrip__analyze_speech", "mcp__filmgrip__view_frames"]
 
 
 class ClaudeAgentTransport(Transport):
