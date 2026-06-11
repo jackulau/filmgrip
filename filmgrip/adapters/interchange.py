@@ -38,7 +38,7 @@ FORMAT_BY_EXT = {
 # Only add_transition stays out — transition fidelity is format-dependent and best done live.
 REBUILD_OPS = frozenset({
     "trim", "delete", "split", "add_marker", "set_property", "move", "insert", "ripple",
-    "retime", "set_enabled",
+    "retime", "set_enabled", "cut_range",
 })
 
 _MARKER_COLOR = {
@@ -235,6 +235,74 @@ class OtioMutator:
                            if m.marked_range.start_time.to_frames() >= boundary]
         track.insert(idx + 1, tail)
         return f"split {clip.name} @ {op.at_frame}"
+
+    def _cut_range(self, op) -> str:
+        """Carve ``[start_frame, end_frame)`` out of a clip — atomic split+split+delete.
+
+        Geometry is read FRESH from the OTIO graph (``range_in_parent``), not the snapshot Clip,
+        so several descending cuts on one clip in one plan each see the current state. With
+        ``ripple=False`` a same-length Gap replaces the removed span; with ``True`` the OTIO
+        sequential track closes it naturally. Markers inside the removed span are dropped with
+        their content; the rest stay on whichever half still contains them.
+        """
+        clip, item = self._clip_and_item(op)
+        track = item.parent()
+        idx = list(track).index(item)
+        rng = item.range_in_parent()
+        cur_start = int(round(rng.start_time.to_frames()))
+        cur_dur = int(round(rng.duration.to_frames()))
+        off_a = max(0, op.start_frame - cur_start)
+        off_b = min(cur_dur, op.end_frame - cur_start)
+        cut_len = off_b - off_a
+        label = f"cut {clip.name} [{op.start_frame}..{op.end_frame}) {cut_len}f"
+        if cut_len <= 0:
+            return label + " (nothing to remove)"
+        sr = item.source_range
+
+        if off_a <= 0 and off_b >= cur_dur:          # the whole clip goes
+            if op.ripple:
+                del track[idx]
+            else:
+                track[idx] = self._gap(cur_dur)
+            return label + " (whole clip)"
+
+        if off_a <= 0:                               # head cut == trim in
+            item.source_range = otio.opentime.TimeRange(
+                sr.start_time + _rt(off_b, self.rate), _rt(cur_dur - off_b, self.rate))
+            self._drop_markers_outside(item)
+            if not op.ripple:
+                track.insert(idx, self._gap(cut_len))
+            return label + " (head)"
+
+        if off_b >= cur_dur:                         # tail cut == trim out
+            item.source_range = otio.opentime.TimeRange(sr.start_time, _rt(off_a, self.rate))
+            self._drop_markers_outside(item)
+            if not op.ripple:
+                track.insert(idx + 1, self._gap(cut_len))
+            return label + " (tail)"
+
+        # Interior: keep [0, off_a) on the original item, [off_b, cur_dur) on a tail copy.
+        item.source_range = otio.opentime.TimeRange(sr.start_time, _rt(off_a, self.rate))
+        tail = item.deepcopy()
+        tail.source_range = otio.opentime.TimeRange(
+            sr.start_time + _rt(off_b, self.rate), _rt(cur_dur - off_b, self.rate))
+        self._drop_markers_outside(item)
+        self._drop_markers_outside(tail)
+        insert_at = idx + 1
+        if not op.ripple:
+            track.insert(insert_at, self._gap(cut_len))
+            insert_at += 1
+        track.insert(insert_at, tail)
+        return label
+
+    @staticmethod
+    def _drop_markers_outside(item) -> None:
+        """Keep only markers whose source position still falls inside the item's source range."""
+        sr = item.source_range
+        lo = sr.start_time.to_frames()
+        hi = lo + sr.duration.to_frames()
+        item.markers[:] = [m for m in item.markers
+                           if lo <= m.marked_range.start_time.to_frames() < hi]
 
     def _add_marker(self, op) -> str:
         clip, item = self._clip_and_item(op)

@@ -89,11 +89,27 @@ def payload_get_transcript(ctx: PlannerContext, ids: Optional[list[str]] = None,
     return transcript_for_clips(ctx.ir, target, backend=backend)
 
 
+def payload_analyze_speech(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
+                           min_silence_ms: int = 400, asr: Optional[str] = None) -> dict:
+    """Deterministic silence/filler analysis + ready-to-apply ``cut_range`` candidates."""
+    from ..perception.speech import analyze_clips
+    from ..perception.transcribe import PerceptionUnavailable, detect_backend
+
+    target = ids if ids else list(ctx.selection.ids)
+    try:
+        backend = detect_backend(asr)
+    except PerceptionUnavailable as exc:
+        return {"clips": [], "candidates": [], "errors": [str(exc)]}
+    return analyze_clips(ctx.ir, target, backend=backend,
+                         min_silence_s=max(0.05, min_silence_ms / 1000.0))
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
     ops = ("trim, move, insert, delete, set_property, set_enabled, add_marker, add_transition, "
-           "split, ripple, retime, import_audio, add_track, rename_track, create_bin, move_to_bin")
+           "split, ripple, retime, cut_range, import_audio, add_track, rename_track, create_bin, "
+           "move_to_bin")
     props = ", ".join(sorted(ep.ALLOWED_PROPERTIES))
     no_audio = ", ".join(sorted(ep.AUDIO_PROPS_UNSUPPORTED))
     return (
@@ -119,9 +135,12 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "warps playback within the clip's existing span — add a ripple if you want the gap closed.\n"
         "Content: when the instruction is about WHAT IS SAID (umms, filler, 'cut after she says "
         "X', tightening an answer), call get_transcript(ids) — phrases come back as "
-        "[startFrame-endFrame] lines in timeline frames. ASR timestamps drift 50-100ms: place "
-        "cuts in the silent gaps between phrases, never inside a word, and pad word edges by "
-        "1-5 frames. If get_transcript returns errors (no ASR backend, offline media), say so — "
+        "[startFrame-endFrame] lines in timeline frames. For 'remove silences/fillers/tighten', "
+        "call analyze_speech(ids) and reuse its ready-made cut_range candidates. cut_range "
+        "removes [start_frame,end_frame) from inside ONE clip (ripple=true closes the hole); "
+        "order rippling cut_ranges on a track LAST-TO-FIRST. ASR timestamps drift 50-100ms: "
+        "place cuts in the silent gaps between phrases, never inside a word, and pad word edges "
+        "by 1-5 frames. If these tools return errors (no ASR backend, offline media), say so — "
         "do not guess content.\n"
         "Return ONLY an EditPlan matching the provided JSON schema. Keep ops minimal and reversible."
     )
@@ -240,12 +259,22 @@ def build_mcp_server(ctx: PlannerContext):
     async def get_transcript(args):  # pragma: no cover
         return _text(payload_get_transcript(ctx, args.get("ids"), asr=args.get("asr")))
 
+    @tool("analyze_speech", "Silence/filler analysis with ready-to-apply cut_range candidates "
+          "(use for 'remove silences', 'cut the umms', 'tighten this').",
+          {"ids": list, "min_silence_ms": int, "asr": str}, read_only)
+    async def analyze_speech(args):  # pragma: no cover
+        return _text(payload_analyze_speech(
+            ctx, args.get("ids"), min_silence_ms=int(args.get("min_silence_ms", 400)),
+            asr=args.get("asr")))
+
     return create_sdk_mcp_server("filmgrip", "0.1.0",
-                                 [get_selection, get_context, query_clips, get_transcript])
+                                 [get_selection, get_context, query_clips, get_transcript,
+                                  analyze_speech])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
-             "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript"]
+             "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript",
+             "mcp__filmgrip__analyze_speech"]
 
 
 class ClaudeAgentTransport(Transport):

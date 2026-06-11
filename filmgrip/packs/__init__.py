@@ -36,6 +36,8 @@ class Pack:
     prompt: str = ""                       # prompt kind (D7): the parameterized instruction
     params: dict = field(default_factory=dict)
     source: str = "built-in"               # "built-in" | a file path (user packs, D7)
+    requires: tuple = ()                   # human-readable runtime needs (e.g. an ASR backend);
+                                           # compile raises PackError with the fix when unmet
 
 
 _REGISTRY: dict[str, Pack] = {}

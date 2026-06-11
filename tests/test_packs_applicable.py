@@ -27,7 +27,11 @@ def test_add_transition_is_not_applicable_anywhere():
 def test_deterministic_builtin_packs_emit_only_applicable_ops():
     ir = TimelineIR.from_otio_file(FIX)
     ids = [c.id for c in ir.real_clips()]
-    builtins = [p for p in all_packs() if p.source == "built-in" and p.kind == "deterministic"]
+    # Packs with declared runtime requirements (e.g. silence-cut needs an ASR backend + media on
+    # disk) can't compile against this bare fixture; their applicability is covered with a fake
+    # backend in tests/test_speech.py. Everything requirement-free must compile here.
+    builtins = [p for p in all_packs()
+                if p.source == "built-in" and p.kind == "deterministic" and not p.requires]
     assert builtins, "expected at least the marker-pass built-in"
     for pack in builtins:
         plan = compile_pack(pack, ir, ids)

@@ -148,6 +148,47 @@
       "title": "CreateBin",
       "type": "object"
     },
+    "CutRange": {
+      "additionalProperties": false,
+      "description": "Remove the timeline frame range ``[start_frame, end_frame)`` from inside one clip \u2014 the\nsilence/filler-removal primitive.\n\nAtomic split+split+delete that stays addressable: it references the ORIGINAL clip id and\nabsolute timeline frames, so one plan can carve several ranges out of one clip (a chain of\n``split`` ops can't \u2014 the middle piece's id doesn't exist until after apply). ``ripple=True``\ncloses the hole (everything later on the track shifts left); ``False`` leaves a gap.\n\nOrdering contract (validated): when ``ripple=True``, cut_range ops on the SAME track must be\nordered last-to-first (descending ``start_frame``) so earlier ranges aren't shifted by the\ntime they apply.",
+      "properties": {
+        "op": {
+          "const": "cut_range",
+          "default": "cut_range",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "start_frame": {
+          "description": "absolute timeline frame the cut starts at",
+          "minimum": 0,
+          "title": "Start Frame",
+          "type": "integer"
+        },
+        "end_frame": {
+          "description": "absolute timeline frame the cut ends before",
+          "exclusiveMinimum": 0,
+          "title": "End Frame",
+          "type": "integer"
+        },
+        "ripple": {
+          "default": true,
+          "description": "True = close the hole; False = leave a gap",
+          "title": "Ripple",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clip_id",
+        "start_frame",
+        "end_frame"
+      ],
+      "title": "CutRange",
+      "type": "object"
+    },
     "Delete": {
       "additionalProperties": false,
       "properties": {
@@ -619,6 +660,7 @@
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
             "create_bin": "#/$defs/CreateBin",
+            "cut_range": "#/$defs/CutRange",
             "delete": "#/$defs/Delete",
             "import_audio": "#/$defs/ImportAudio",
             "insert": "#/$defs/Insert",
@@ -682,6 +724,9 @@
           },
           {
             "$ref": "#/$defs/SetEnabled"
+          },
+          {
+            "$ref": "#/$defs/CutRange"
           }
         ]
       },

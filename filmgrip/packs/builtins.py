@@ -25,6 +25,50 @@ register(Pack("marker-pass", "Drop a review marker on each selected clip.",
               compile=_marker_pass, params={"color": "Blue", "note": "review"}))
 
 
+def _silence_cut(ir, ids, params) -> list:
+    """Transcript-driven silence/filler removal — zero LLM calls.
+
+    Pulls word-level transcripts (perception layer), finds silences ≥ min_silence and filler
+    words, and compiles descending ``cut_range`` ops. Honest failure: no ASR backend, offline
+    media, or per-clip analysis errors raise PackError with the real reasons — the pack never
+    silently edits less than it was asked to.
+    """
+    from ..perception.speech import analyze_clips
+    from ..perception.transcribe import PerceptionUnavailable, detect_backend
+    from . import PackError
+
+    try:
+        backend = detect_backend()
+    except PerceptionUnavailable as exc:
+        raise PackError(f"silence-cut needs a transcription backend:\n{exc}") from exc
+    min_silence_s = _seconds(params.get("min_silence", "0.4s"))
+    include_fillers = str(params.get("fillers", "true")).lower() not in ("false", "0", "no")
+    analysis = analyze_clips(
+        ir, [c.id for c in selected_clips(ir, ids)], backend=backend,
+        min_silence_s=min_silence_s, include_fillers=include_fillers)
+    if analysis["errors"]:
+        raise PackError("silence-cut could not analyze every selected clip:\n  "
+                        + "\n  ".join(analysis["errors"]))
+    return analysis["candidates"]
+
+
+def _seconds(value) -> float:
+    """'0.4s' / '400ms' / 0.4 → seconds."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().lower()
+    if text.endswith("ms"):
+        return float(text[:-2]) / 1000.0
+    return float(text[:-1] if text.endswith("s") else text)
+
+
+register(Pack("silence-cut", "Remove silences (and umm/uh fillers) from the selected clips, "
+                             "driven by word-level transcripts — deterministic, no LLM call.",
+              compile=_silence_cut, params={"min_silence": "0.4s", "fillers": "true"},
+              requires=("an ASR backend (pip install 'film-grip[transcribe]', whisper.cpp, or "
+                        "ELEVENLABS_API_KEY)", "source media files on disk")))
+
+
 # --- prompt packs (D7): a saved instruction handed to the active planner backend ---------------
 # Parameters fill {placeholders} in the prompt at apply time; users can add their own prompt packs
 # as data files in ~/.filmgrip/packs (see filmgrip.packs.loader).

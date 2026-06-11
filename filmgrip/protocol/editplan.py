@@ -250,10 +250,37 @@ class SetEnabled(_Op):
     enabled: bool = Field(description="True = enable the clip, False = disable (mute) it")
 
 
+class CutRange(_Op):
+    """Remove the timeline frame range ``[start_frame, end_frame)`` from inside one clip — the
+    silence/filler-removal primitive.
+
+    Atomic split+split+delete that stays addressable: it references the ORIGINAL clip id and
+    absolute timeline frames, so one plan can carve several ranges out of one clip (a chain of
+    ``split`` ops can't — the middle piece's id doesn't exist until after apply). ``ripple=True``
+    closes the hole (everything later on the track shifts left); ``False`` leaves a gap.
+
+    Ordering contract (validated): when ``ripple=True``, cut_range ops on the SAME track must be
+    ordered last-to-first (descending ``start_frame``) so earlier ranges aren't shifted by the
+    time they apply.
+    """
+    op: Literal["cut_range"] = "cut_range"
+    clip_id: str
+    start_frame: int = Field(ge=0, description="absolute timeline frame the cut starts at")
+    end_frame: int = Field(gt=0, description="absolute timeline frame the cut ends before")
+    ripple: bool = Field(default=True, description="True = close the hole; False = leave a gap")
+
+    @model_validator(mode="after")
+    def _range_is_forward(self) -> "CutRange":
+        if self.end_frame <= self.start_frame:
+            raise ValueError(
+                f"cut_range needs start_frame < end_frame (got {self.start_frame}..{self.end_frame})")
+        return self
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
-        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled,
+        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
     ],
     Field(discriminator="op"),
 ]

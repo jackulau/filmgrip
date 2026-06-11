@@ -22,6 +22,7 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | trim | rebuild | yes | yes |
 | move | rebuild | yes | yes |
 | split | rebuild | yes | yes |
+| cut_range | rebuild | yes | yes |
 | insert | rebuild | yes | yes |
 | ripple | rebuild | yes | yes |
 | delete | yes | yes | yes |

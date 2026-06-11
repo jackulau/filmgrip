@@ -28,6 +28,8 @@ SPLIT_OUT_OF_CLIP = "SPLIT_OUT_OF_CLIP"
 NOT_A_CLIP = "NOT_A_CLIP"
 NOT_AUDIO_TRACK = "NOT_AUDIO_TRACK"
 NO_AUDIO_SOURCE = "NO_AUDIO_SOURCE"
+CUT_RANGE_ORDER = "CUT_RANGE_ORDER"
+CLIP_TIMEWARPED = "CLIP_TIMEWARPED"
 
 _TRANSITIONS_NEED_NEIGHBOR = {"cross_dissolve", "dip_to_color", "smooth_cut", "wipe"}
 
@@ -94,6 +96,15 @@ def _source_available(clip: Clip):
     return start, start + int(round(rng.duration.to_frames()))
 
 
+def _is_timewarped(clip: Clip) -> bool:
+    """True when the clip carries a retime effect — frame surgery on it would be wrong."""
+    import opentimelineio as otio
+
+    effects = getattr(clip.otio, "effects", None) or []
+    return any(isinstance(e, (otio.schema.LinearTimeWarp, otio.schema.FreezeFrame))
+               for e in effects)
+
+
 def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
     res = ValidationResult()
     seq_dur = ir.duration
@@ -107,6 +118,10 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
     # A plan can add_track then target it, so track-existence is evaluated against the timeline
     # PLUS tracks created by earlier ops in the same plan.
     added = {"video": 0, "audio": 0, "subtitle": 0}
+
+    # Ordering contract for rippling cut_range ops: per track, strictly descending start_frame
+    # (last-to-first), so a later op's frames aren't invalidated by an earlier op's ripple.
+    last_ripple_cut_start: dict[str, int] = {}
 
     def track_exists(code: str) -> bool:
         try:
@@ -122,7 +137,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
-                    "split", "move_to_bin", "retime", "set_enabled"):
+                    "split", "move_to_bin", "retime", "set_enabled", "cut_range"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -194,6 +209,24 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             if not (clip.start < op.at_frame < clip.end):
                 err(SPLIT_OUT_OF_CLIP, i, name,
                     f"split frame {op.at_frame} not inside clip {clip.start}..{clip.end}", op.clip_id)
+
+        elif name == "cut_range":
+            if not (clip.start <= op.start_frame < op.end_frame <= clip.end):
+                err(OUT_OF_BOUNDS, i, name,
+                    f"range {op.start_frame}..{op.end_frame} not inside clip "
+                    f"{clip.start}..{clip.end}", op.clip_id)
+            elif _is_timewarped(clip):
+                err(CLIP_TIMEWARPED, i, name,
+                    f"'{op.clip_id}' is retimed — frame ranges inside a time-warped clip don't "
+                    f"map linearly; remove the retime first or address whole clips", op.clip_id)
+            elif op.ripple:
+                code = _code_of(clip)
+                prev = last_ripple_cut_start.get(code)
+                if prev is not None and op.start_frame >= prev:
+                    err(CUT_RANGE_ORDER, i, name,
+                        f"rippling cut_range ops on track {code} must be ordered last-to-first "
+                        f"(this start {op.start_frame} ≥ previous {prev})", op.clip_id)
+                last_ripple_cut_start[code] = op.start_frame
 
         elif name == "ripple":
             if op.track and not track_exists(op.track):
@@ -287,6 +320,10 @@ def _describe(op, ir: TimelineIR) -> str:
         return f"{op.type} ({op.duration}f) on {nm(op.clip_id)} {op.edge} edge"
     if op.op == "split":
         return f"split {nm(op.clip_id)} @ {op.at_frame}"
+    if op.op == "cut_range":
+        dur = op.end_frame - op.start_frame
+        how = "ripple" if op.ripple else "leave gap"
+        return f"cut {nm(op.clip_id)} [{op.start_frame}..{op.end_frame}) {dur}f ({how})"
     if op.op == "ripple":
         scope = op.track or "all tracks"
         return f"ripple {scope} from {op.from_frame} by {op.delta:+d}"
