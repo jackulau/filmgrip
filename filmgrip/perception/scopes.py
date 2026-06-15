@@ -109,6 +109,33 @@ def analyze_rgb(arr: Any) -> dict:
     }
 
 
+def apply_cdl_array(arr: Any, cdl: Any) -> Any:
+    """Apply an ASC CDL (anything with ``slope``/``offset``/``power``/``saturation``, e.g.
+    :class:`filmgrip.color.CDL`) to an ``(H, W, 3)`` uint8 frame, returning the graded uint8 frame.
+
+    Vectorized, and the SAME math as :meth:`filmgrip.color.CDL.apply` — this is the predictive
+    engine for the verify loop: it lets film-grip compute what a grade WILL look like (its scopes)
+    without asking the editor to render, which is what makes the perceive→propose→verify→iterate
+    loop closeable offline (LumiVideo's "analytically guaranteed" CDL effect)."""
+    _need_numpy()
+    a = np.asarray(arr)[:, :, :3].astype(np.float64) / 255.0
+    slope = np.asarray(cdl.slope, dtype=np.float64)
+    offset = np.asarray(cdl.offset, dtype=np.float64)
+    power = np.asarray(cdl.power, dtype=np.float64)
+    out = np.clip(a * slope + offset, 0.0, None) ** power
+    sat = float(cdl.saturation)
+    if sat != 1.0:
+        luma = out @ np.asarray(_LUMA, dtype=np.float64)
+        out = luma[..., None] + sat * (out - luma[..., None])
+    return (np.clip(out, 0.0, 1.0) * 255.0).round().astype(np.uint8)
+
+
+def predict_grade_reading(arr: Any, cdl: Any) -> dict:
+    """Predict the scope reading of a frame AFTER a CDL is applied — perception of a proposed grade
+    with no editor round-trip."""
+    return analyze_rgb(apply_cdl_array(arr, cdl))
+
+
 def frame_rgb(media_path: str, at_s: float = 0.0, *, width: int = _SCOPE_WIDTH,
               height: int = _SCOPE_HEIGHT) -> Any:
     """Extract one frame at ``at_s`` (media seconds) as an ``(H, W, 3)`` uint8 numpy array, via
