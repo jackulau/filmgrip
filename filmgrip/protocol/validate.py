@@ -140,7 +140,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
                     "split", "move_to_bin", "retime", "set_enabled", "cut_range", "set_cdl",
-                    "apply_lut"):
+                    "apply_lut", "color_group", "color_version"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -384,4 +384,9 @@ def _describe(op, ir: TimelineIR) -> str:
     if op.op == "apply_lut":
         import os as _os
         return f"apply LUT {_os.path.basename(op.path)} on {nm(op.clip_id)} (node {op.node_index})"
+    if op.op == "color_group":
+        verb = "assign" if op.action == "assign" else "remove from"
+        return f"{verb} color group {op.group!r}: {nm(op.clip_id)}"
+    if op.op == "color_version":
+        return f"{op.action} color version {op.name!r} ({op.version_type}) on {nm(op.clip_id)}"
     return op.op

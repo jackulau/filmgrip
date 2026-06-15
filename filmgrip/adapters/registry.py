@@ -135,7 +135,7 @@ _OP_DISPLAY_ORDER = (
     "trim", "move", "split", "cut_range", "insert", "ripple", "delete", "retime",
     "add_marker", "set_property", "set_enabled", "add_transition",
     "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
-    "set_cdl", "apply_lut",
+    "set_cdl", "apply_lut", "color_group", "color_version",
 )
 
 # Cosmetic suffixes only — the yes/no/rebuild/n-a classification itself is derived, never hand-set.

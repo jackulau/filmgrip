@@ -382,11 +382,41 @@ class ApplyLut(_Op):
                             description="1-based color-node the LUT attaches to (Resolve)")
 
 
+class ColorGroup(_Op):
+    """Assign a clip to a named DaVinci Resolve **color group** (or remove it) — the
+    organize-grades-together primitive (the color-side analog of ``create_bin``/``move_to_bin``).
+
+    A color group shares pre- and post-clip grade nodes across every member clip, so one grade
+    drives a whole set of shots (an interview's A-cam, all the night exteriors). film-grip creates
+    the group if it doesn't exist, then assigns the clip. This is a **Resolve-live** concept with no
+    interchange equivalent — declared honestly as live-only (a file editor gets nothing).
+    """
+    op: Literal["color_group"] = "color_group"
+    clip_id: str
+    group: str = Field(min_length=1, max_length=120, description="color-group name (created if absent)")
+    action: Literal["assign", "remove"] = "assign"
+
+
+class ColorVersion(_Op):
+    """Add or load a named **color version** on a clip — Resolve's alternate-grade slots (e.g. a
+    'client' vs 'director' grade on the same shot).
+
+    ``action='add'`` creates the version; ``'load'`` switches the clip to it. ``version_type`` is
+    local or remote (Resolve's two version scopes). Resolve-live only — color versions have no
+    portable interchange form.
+    """
+    op: Literal["color_version"] = "color_version"
+    clip_id: str
+    name: str = Field(min_length=1, max_length=120, description="version name")
+    action: Literal["add", "load"] = "add"
+    version_type: Literal["local", "remote"] = "local"
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
         ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
-        SetCDL, ApplyLut,
+        SetCDL, ApplyLut, ColorGroup, ColorVersion,
     ],
     Field(discriminator="op"),
 ]

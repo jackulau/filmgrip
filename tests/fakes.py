@@ -40,6 +40,17 @@ class FakeMediaPoolItem:
         return {} if key is None else ""
 
 
+class FakeColorGroup:
+    """Resolve ColorGroup (``Project.AddColorGroup`` → assigned via ``TimelineItem``)."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self.calls: list[tuple] = []
+
+    def GetName(self) -> str:
+        return self._name
+
+
 class FakeColorGraph:
     """Resolve 19+ Graph object (``TimelineItem.GetNodeGraph()``) — SetLUT/GetLUT live HERE on
     newer builds, not on the TimelineItem. Mirrors the version split the adapter branches on."""
@@ -95,6 +106,9 @@ class FakeTimelineItem:
         self._graph: Optional[FakeColorGraph] = None
         self._cdl: Optional[dict] = None
         self._item_luts: dict[int, str] = {}
+        self._color_group: Any = None
+        self._versions: list[tuple] = []
+        self._current_version: Optional[tuple] = None
 
     # -- reads ------------------------------------------------------------------
     def GetName(self) -> str:
@@ -196,6 +210,38 @@ class FakeTimelineItem:
 
     def GetLUT(self, node_index):
         return self._item_luts.get(int(node_index), "")
+
+    # color groups + versions (Resolve-live color organization)
+    def AssignToColorGroup(self, group) -> bool:
+        self.calls.append(("AssignToColorGroup", group.GetName() if hasattr(group, "GetName") else group))
+        self._color_group = group
+        return True
+
+    def GetColorGroup(self):
+        return self._color_group
+
+    def RemoveFromColorGroup(self) -> bool:
+        self.calls.append(("RemoveFromColorGroup",))
+        self._color_group = None
+        return True
+
+    def AddVersion(self, name, version_type) -> bool:
+        self.calls.append(("AddVersion", name, version_type))
+        self._versions.append((name, int(version_type)))
+        return True
+
+    def LoadVersionByName(self, name, version_type) -> bool:
+        self.calls.append(("LoadVersionByName", name, version_type))
+        self._current_version = (name, int(version_type))
+        return True
+
+    def DeleteVersionByName(self, name, version_type) -> bool:
+        self.calls.append(("DeleteVersionByName", name, version_type))
+        self._versions = [v for v in self._versions if v != (name, int(version_type))]
+        return True
+
+    def GetVersionNameList(self, version_type):
+        return [n for (n, t) in self._versions if t == int(version_type)]
 
     # NOTE: real Resolve TimelineItem has NO SetName — renaming goes through the MediaPoolItem's
     # "Clip Name" property. The fake omits SetName deliberately so tests match the live API.
@@ -402,9 +448,25 @@ class FakeProject:
         self._name = name
         self._timeline = timeline
         self._media_pool = media_pool or FakeMediaPool()
+        self._color_groups: list[FakeColorGroup] = []
 
     def GetName(self) -> str:
         return self._name
+
+    # color groups (Resolve-live color organization)
+    def AddColorGroup(self, name: str) -> FakeColorGroup:
+        g = FakeColorGroup(name)
+        self._color_groups.append(g)
+        return g
+
+    def GetColorGroupsList(self) -> list:
+        return list(self._color_groups)
+
+    def DeleteColorGroup(self, group) -> bool:
+        if group in self._color_groups:
+            self._color_groups.remove(group)
+            return True
+        return False
 
     def GetCurrentTimeline(self) -> Optional[FakeTimeline]:
         return self._timeline

@@ -38,3 +38,5 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | move_to_bin | yes | n/a | no |
 | set_cdl | yes | yes | yes |
 | apply_lut | yes | yes | yes |
+| color_group | yes | no | no |
+| color_version | yes | no | no |

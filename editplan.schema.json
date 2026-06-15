@@ -212,6 +212,119 @@
       "title": "ApplyLut",
       "type": "object"
     },
+    "ColorGroup": {
+      "additionalProperties": false,
+      "description": "Assign a clip to a named DaVinci Resolve **color group** (or remove it) \u2014 the\norganize-grades-together primitive (the color-side analog of ``create_bin``/``move_to_bin``).\n\nA color group shares pre- and post-clip grade nodes across every member clip, so one grade\ndrives a whole set of shots (an interview's A-cam, all the night exteriors). film-grip creates\nthe group if it doesn't exist, then assigns the clip. This is a **Resolve-live** concept with no\ninterchange equivalent \u2014 declared honestly as live-only (a file editor gets nothing).",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "color_group",
+          "default": "color_group",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "group": {
+          "description": "color-group name (created if absent)",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Group",
+          "type": "string"
+        },
+        "action": {
+          "default": "assign",
+          "enum": [
+            "assign",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id",
+        "group"
+      ],
+      "title": "ColorGroup",
+      "type": "object"
+    },
+    "ColorVersion": {
+      "additionalProperties": false,
+      "description": "Add or load a named **color version** on a clip \u2014 Resolve's alternate-grade slots (e.g. a\n'client' vs 'director' grade on the same shot).\n\n``action='add'`` creates the version; ``'load'`` switches the clip to it. ``version_type`` is\nlocal or remote (Resolve's two version scopes). Resolve-live only \u2014 color versions have no\nportable interchange form.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "color_version",
+          "default": "color_version",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "version name",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "action": {
+          "default": "add",
+          "enum": [
+            "add",
+            "load"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "version_type": {
+          "default": "local",
+          "enum": [
+            "local",
+            "remote"
+          ],
+          "title": "Version Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id",
+        "name"
+      ],
+      "title": "ColorVersion",
+      "type": "object"
+    },
     "CreateBin": {
       "additionalProperties": false,
       "description": "Create a media-pool bin/folder (organizing primitive).",
@@ -1031,6 +1144,8 @@
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
             "apply_lut": "#/$defs/ApplyLut",
+            "color_group": "#/$defs/ColorGroup",
+            "color_version": "#/$defs/ColorVersion",
             "create_bin": "#/$defs/CreateBin",
             "cut_range": "#/$defs/CutRange",
             "delete": "#/$defs/Delete",
@@ -1106,6 +1221,12 @@
           },
           {
             "$ref": "#/$defs/ApplyLut"
+          },
+          {
+            "$ref": "#/$defs/ColorGroup"
+          },
+          {
+            "$ref": "#/$defs/ColorVersion"
           }
         ]
       },

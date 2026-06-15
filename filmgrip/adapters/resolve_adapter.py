@@ -35,7 +35,8 @@ from .resolve_client import (
 # move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
-LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled", "set_cdl", "apply_lut"})
+LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled", "set_cdl", "apply_lut",
+                      "color_group", "color_version"})
 
 # Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
@@ -529,7 +530,53 @@ class ResolveAdapter(GrabAdapter):
         if op.op == "apply_lut":
             return self._apply_lut_live(op, clip, item)
 
+        if op.op == "color_group":
+            return self._apply_color_group(op, clip, item, session)
+
+        if op.op == "color_version":
+            return self._apply_color_version(op, clip, item)
+
         raise ResolveOperationFailed(f"op '{op.op}' is not a live op")
+
+    @staticmethod
+    def _find_color_group(project, name):
+        groups = project.GetColorGroupsList() if hasattr(project, "GetColorGroupsList") else []
+        for g in groups or []:
+            if (g.GetName() if hasattr(g, "GetName") else "") == name:
+                return g
+        return None
+
+    def _apply_color_group(self, op, clip, item, session):
+        """Assign a clip to (or remove it from) a named color group via the Project + TimelineItem
+        color-group API. One group's shared nodes then drive every member clip."""
+        project = require(session.current_project() if session else None,
+                          "no current project (open one in Resolve)")
+        old = item.GetColorGroup() if hasattr(item, "GetColorGroup") else None
+        if op.action == "remove":
+            require(_native_call(item, "RemoveFromColorGroup"),
+                    f"RemoveFromColorGroup failed on '{clip.name}'")
+            inverse = (lambda: _native_call(item, "AssignToColorGroup", old)) if old else None
+            return (f"remove {clip.name} from its color group", inverse, None)
+        group = self._find_color_group(project, op.group) or require(
+            _native_call(project, "AddColorGroup", op.group), f"AddColorGroup '{op.group}' failed")
+        require(_native_call(item, "AssignToColorGroup", group),
+                f"AssignToColorGroup '{op.group}' failed on '{clip.name}'")
+        inverse = ((lambda: _native_call(item, "AssignToColorGroup", old)) if old is not None
+                   else (lambda: _native_call(item, "RemoveFromColorGroup")))
+        return (f"assign {clip.name} → color group '{op.group}'", inverse, None)
+
+    def _apply_color_version(self, op, clip, item):
+        """Add or load a named color version (Resolve's alternate-grade slots). versionType: 0=local,
+        1=remote."""
+        vtype = 0 if op.version_type == "local" else 1
+        if op.action == "load":
+            require(_native_call(item, "LoadVersionByName", op.name, vtype),
+                    f"LoadVersionByName '{op.name}' failed on '{clip.name}'")
+            return (f"load color version '{op.name}' on {clip.name}", None, None)
+        require(_native_call(item, "AddVersion", op.name, vtype),
+                f"AddVersion '{op.name}' failed on '{clip.name}'")
+        inverse = lambda: _native_call(item, "DeleteVersionByName", op.name, vtype)  # noqa: E731
+        return (f"add color version '{op.name}' on {clip.name}", inverse, None)
 
     # -- live color ops (set_cdl, apply_lut) ------------------------------------
     def _apply_cdl(self, op, clip, item):
