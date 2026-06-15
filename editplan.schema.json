@@ -795,6 +795,14 @@
           "title": "Saturation",
           "type": "number"
         },
+        "node_index": {
+          "default": 1,
+          "description": "1-based color node the grade lands on in Resolve",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Node Index",
+          "type": "integer"
+        },
         "color_space": {
           "default": "",
           "description": "intended working space (CDL declares none); '' = project default",

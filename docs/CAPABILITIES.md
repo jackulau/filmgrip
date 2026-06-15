@@ -36,5 +36,5 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | rename_track | yes | n/a | no |
 | create_bin | yes | n/a | no |
 | move_to_bin | yes | n/a | no |
-| set_cdl | rebuild | yes | yes |
-| apply_lut | rebuild | yes | yes |
+| set_cdl | yes | yes | yes |
+| apply_lut | yes | yes | yes |

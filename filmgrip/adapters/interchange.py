@@ -377,6 +377,7 @@ class OtioMutator:
             "offset": list(op.offset),
             "power": list(op.power),
             "saturation": float(op.saturation),
+            "node_index": int(op.node_index),
         }
         if op.color_space:
             cdl["color_space"] = op.color_space

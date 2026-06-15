@@ -35,7 +35,7 @@ from .resolve_client import (
 # move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
-LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled"})
+LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled", "set_cdl", "apply_lut"})
 
 # Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
@@ -523,7 +523,68 @@ class ResolveAdapter(GrabAdapter):
             # Delete is not cleanly reversible via the API; no inverse (validated up-front).
             return (f"delete {clip.name}", None, None)
 
+        if op.op == "set_cdl":
+            return self._apply_cdl(op, clip, item)
+
+        if op.op == "apply_lut":
+            return self._apply_lut_live(op, clip, item)
+
         raise ResolveOperationFailed(f"op '{op.op}' is not a live op")
+
+    # -- live color ops (set_cdl, apply_lut) ------------------------------------
+    def _apply_cdl(self, op, clip, item):
+        """Apply an ASC CDL primary grade to a node via ``TimelineItem.SetCDL`` (the one color
+        primitive Resolve's API exposes directly).
+
+        ``SetCDL`` is **write-only** — Resolve has no ``GetCDL`` — so film-grip cannot read a
+        node's prior grade to restore it. The rollback inverse therefore resets the node to the
+        identity grade (neutral), which cleanly removes the grade film-grip just applied; if the
+        node carried a pre-existing grade, that is NOT recoverable via the API. We surface that
+        plainly rather than implying a perfect undo.
+        """
+        from ..color.cdl import CDL
+
+        cdl = CDL(slope=tuple(op.slope), offset=tuple(op.offset), power=tuple(op.power),
+                  saturation=op.saturation, color_space=op.color_space)
+        require(_native_call(item, "SetCDL", cdl.to_resolve(op.node_index)),
+                f"SetCDL failed on '{clip.name}' (node {op.node_index})")
+        identity = CDL.identity().to_resolve(op.node_index)
+        inverse = lambda: _native_call(item, "SetCDL", identity)  # noqa: E731
+        warn = ("Resolve's CDL API is write-only (no GetCDL): an undo resets the node to neutral, "
+                "not to any prior grade on it")
+        cs = f" @{op.color_space}" if op.color_space else ""
+        return (f"grade {clip.name} CDL sat {op.saturation:g} (node {op.node_index}){cs}", inverse, warn)
+
+    def _apply_lut_live(self, op, clip, item):
+        """Attach a LUT to a color node via ``SetLUT(nodeIndex, path)``.
+
+        The method lives on the **Graph** object in Resolve 19+ (``item.GetNodeGraph().SetLUT``) and
+        directly on the **TimelineItem** in older builds, so film-grip prefers the Graph and falls
+        back to the item. Unlike CDL, ``GetLUT`` IS readable, so the inverse restores the node's
+        prior LUT (empty string clears it) for a real undo.
+        """
+        node = op.node_index
+        target = item
+        getg = getattr(item, "GetNodeGraph", None)
+        if callable(getg):
+            try:
+                graph = getg()
+            except Exception:
+                graph = None
+            if graph is not None and callable(getattr(graph, "SetLUT", None)):
+                target = graph
+        old = None
+        getl = getattr(target, "GetLUT", None)
+        if callable(getl):
+            try:
+                old = getl(node)
+            except Exception:
+                old = None
+        require(_native_call(target, "SetLUT", node, op.path),
+                f"SetLUT failed on '{clip.name}' (node {node})")
+        restore = old if old is not None else ""
+        inverse = lambda: _native_call(target, "SetLUT", node, restore)  # noqa: E731
+        return (f"apply LUT {os.path.basename(op.path)} on {clip.name} (node {node})", inverse, None)
 
     def _rename(self, clip, item, value: str):
         """Rename a clip via its MediaPoolItem's 'Clip Name' (Resolve has no TimelineItem.SetName).

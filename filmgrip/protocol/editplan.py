@@ -342,6 +342,8 @@ class SetCDL(_Op):
                                description="RGB gamma exponent (>0); identity = [1,1,1]")
     saturation: float = Field(default=1.0, ge=0.0, le=4.0,
                               description="1 = unchanged, 0 = greyscale, >1 boosts")
+    node_index: int = Field(default=1, ge=1, le=128,
+                            description="1-based color node the grade lands on in Resolve")
     color_space: str = Field(default="", max_length=40,
                              description="intended working space (CDL declares none); '' = project default")
 
