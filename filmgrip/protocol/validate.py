@@ -137,7 +137,7 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
-                    "split", "move_to_bin", "retime", "set_enabled", "cut_range"):
+                    "split", "move_to_bin", "retime", "set_enabled", "cut_range", "set_cdl"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -353,4 +353,10 @@ def _describe(op, ir: TimelineIR) -> str:
         return f"retime {nm(op.clip_id)} → {how}"
     if op.op == "set_enabled":
         return f"{'enable' if op.enabled else 'disable'} {nm(op.clip_id)}"
+    if op.op == "set_cdl":
+        def g(t):
+            return f"[{t[0]:.3g} {t[1]:.3g} {t[2]:.3g}]"
+        cs = f" @{op.color_space}" if op.color_space else ""
+        return (f"grade {nm(op.clip_id)} CDL slope{g(op.slope)} offset{g(op.offset)} "
+                f"power{g(op.power)} sat {op.saturation:g}{cs}")
     return op.op

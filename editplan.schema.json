@@ -684,6 +684,80 @@
       "title": "Ripple",
       "type": "object"
     },
+    "SetCDL": {
+      "additionalProperties": false,
+      "description": "Apply an **ASC CDL** primary grade to a clip \u2014 film-grip's portable color primitive.\n\nTen numbers: ``slope``/``offset``/``power`` per RGB channel (SOP) + a ``saturation`` scalar.\nThis carries the *decision*, not an editor's node graph, so the SAME grade lands live in\nDaVinci Resolve (``TimelineItem.SetCDL`` per node), rides through OTIO clip metadata, and\nexports to ``.cdl``/``.cc`` sidecars + FCPXML ``info-asc-cdl`` \u2014 portable across every adapter.\n\nIdentity grade (no-op): ``slope=[1,1,1] offset=[0,0,0] power=[1,1,1] saturation=1``. Math is\n``out = (max(0, in*slope + offset))**power`` then saturation about Rec.709 luma. ``power`` must\nbe > 0; ``slope`` and ``saturation`` >= 0; ``offset`` is unbounded by the standard. CDL carries\nno working space, so declare ``color_space`` when the footage isn't already in the grade's\nintended space (e.g. grading log footage) \u2014 film-grip surfaces it rather than guessing.\n\nColorist controls (lift/gamma/gain/contrast/temp/tint) compile to this via\n``filmgrip.color.lgg_to_cdl`` \u2014 emit raw SOP here, or let a grade pack / the ``film-grip grade``\nCLI do the lowering. Richer color work (curves, qualifiers, Power Windows, Magic Mask) is\nGUI-only in every NLE and is surfaced as an advisory step, never silently applied.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "set_cdl",
+          "default": "set_cdl",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "slope": {
+          "description": "RGB multiplicative gain (>=0); identity = [1,1,1]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Slope",
+          "type": "array"
+        },
+        "offset": {
+          "description": "RGB additive lift; identity = [0,0,0]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Offset",
+          "type": "array"
+        },
+        "power": {
+          "description": "RGB gamma exponent (>0); identity = [1,1,1]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Power",
+          "type": "array"
+        },
+        "saturation": {
+          "default": 1.0,
+          "description": "1 = unchanged, 0 = greyscale, >1 boosts",
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Saturation",
+          "type": "number"
+        },
+        "color_space": {
+          "default": "",
+          "description": "intended working space (CDL declares none); '' = project default",
+          "maxLength": 40,
+          "title": "Color Space",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "SetCDL",
+      "type": "object"
+    },
     "SetEnabled": {
       "additionalProperties": false,
       "description": "Enable or disable a clip without removing it (a disabled clip stays on the timeline but is\nskipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO\nrebuild (the clip's ``enabled`` flag).",
@@ -879,7 +953,7 @@
   "description": "An ordered list of typed ops plus an optional one-line rationale.",
   "properties": {
     "version": {
-      "default": 3,
+      "default": 4,
       "title": "Version",
       "type": "integer"
     },
@@ -907,6 +981,7 @@
             "rename_track": "#/$defs/RenameTrack",
             "retime": "#/$defs/Retime",
             "ripple": "#/$defs/Ripple",
+            "set_cdl": "#/$defs/SetCDL",
             "set_enabled": "#/$defs/SetEnabled",
             "set_property": "#/$defs/SetProperty",
             "split": "#/$defs/Split",
@@ -965,6 +1040,9 @@
           },
           {
             "$ref": "#/$defs/CutRange"
+          },
+          {
+            "$ref": "#/$defs/SetCDL"
           }
         ]
       },

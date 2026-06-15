@@ -21,7 +21,16 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 3  # v2 added audio + organize ops; v3 adds cut_range and per-op reason/quote rationale
+SCHEMA_VERSION = 4  # v2 added audio + organize ops; v3 added cut_range + per-op rationale; v4 adds color grading (set_cdl …)
+
+# Working color spaces a grade may declare. CDL itself carries NO working space — the same numbers
+# look different in log vs display-referred footage — so film-grip lets a grade name its intended
+# space honestly rather than silently assuming one. "" = unspecified (use the project's space).
+COLOR_SPACES: frozenset[str] = frozenset({
+    "", "rec709", "rec2020", "srgb", "aces", "acescct", "acescc", "davinci_wide_gamut",
+    "arri_logc3", "arri_logc4", "sony_slog3", "red_log3g10", "blackmagic_film_gen5",
+    "panasonic_vlog", "canon_clog3", "linear",
+})
 
 # Properties an adapter is allowed to set. Anything outside this set is rejected at parse time —
 # Claude cannot invent a destructive or unsupported property key. Adapters map these to their
@@ -286,10 +295,74 @@ class CutRange(_Op):
         return self
 
 
+def _triple_in_range(name: str, lo: Optional[float], hi: Optional[float]):
+    """Build a validator that enforces an SOP field is exactly 3 floats, each within [lo, hi]."""
+    def _check(v: list[float]) -> list[float]:
+        vals = list(v)
+        if len(vals) != 3:
+            raise ValueError(f"{name} must be exactly 3 values (r, g, b), got {len(vals)}")
+        out = []
+        for ch in vals:
+            f = float(ch)
+            if lo is not None and f < lo:
+                raise ValueError(f"{name} value {f} below minimum {lo}")
+            if hi is not None and f > hi:
+                raise ValueError(f"{name} value {f} above maximum {hi}")
+            out.append(f)
+        return out
+    return _check
+
+
+class SetCDL(_Op):
+    """Apply an **ASC CDL** primary grade to a clip — film-grip's portable color primitive.
+
+    Ten numbers: ``slope``/``offset``/``power`` per RGB channel (SOP) + a ``saturation`` scalar.
+    This carries the *decision*, not an editor's node graph, so the SAME grade lands live in
+    DaVinci Resolve (``TimelineItem.SetCDL`` per node), rides through OTIO clip metadata, and
+    exports to ``.cdl``/``.cc`` sidecars + FCPXML ``info-asc-cdl`` — portable across every adapter.
+
+    Identity grade (no-op): ``slope=[1,1,1] offset=[0,0,0] power=[1,1,1] saturation=1``. Math is
+    ``out = (max(0, in*slope + offset))**power`` then saturation about Rec.709 luma. ``power`` must
+    be > 0; ``slope`` and ``saturation`` >= 0; ``offset`` is unbounded by the standard. CDL carries
+    no working space, so declare ``color_space`` when the footage isn't already in the grade's
+    intended space (e.g. grading log footage) — film-grip surfaces it rather than guessing.
+
+    Colorist controls (lift/gamma/gain/contrast/temp/tint) compile to this via
+    ``filmgrip.color.lgg_to_cdl`` — emit raw SOP here, or let a grade pack / the ``film-grip grade``
+    CLI do the lowering. Richer color work (curves, qualifiers, Power Windows, Magic Mask) is
+    GUI-only in every NLE and is surfaced as an advisory step, never silently applied.
+    """
+    op: Literal["set_cdl"] = "set_cdl"
+    clip_id: str
+    slope: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0],
+                               description="RGB multiplicative gain (>=0); identity = [1,1,1]")
+    offset: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0],
+                                description="RGB additive lift; identity = [0,0,0]")
+    power: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0],
+                               description="RGB gamma exponent (>0); identity = [1,1,1]")
+    saturation: float = Field(default=1.0, ge=0.0, le=4.0,
+                              description="1 = unchanged, 0 = greyscale, >1 boosts")
+    color_space: str = Field(default="", max_length=40,
+                             description="intended working space (CDL declares none); '' = project default")
+
+    _v_slope = field_validator("slope")(_triple_in_range("slope", 0.0, 100.0))
+    _v_offset = field_validator("offset")(_triple_in_range("offset", -10.0, 10.0))
+    _v_power = field_validator("power")(_triple_in_range("power", 1e-6, 100.0))
+
+    @field_validator("color_space")
+    @classmethod
+    def _space_known(cls, v: str) -> str:
+        key = v.strip().lower()
+        if key not in COLOR_SPACES:
+            raise ValueError(f"unknown color_space '{v}'; one of {sorted(c for c in COLOR_SPACES if c)}")
+        return key
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
         ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
+        SetCDL,
     ],
     Field(discriminator="op"),
 ]

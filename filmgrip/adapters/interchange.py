@@ -38,7 +38,7 @@ FORMAT_BY_EXT = {
 # Only add_transition stays out — transition fidelity is format-dependent and best done live.
 REBUILD_OPS = frozenset({
     "trim", "delete", "split", "add_marker", "set_property", "move", "insert", "ripple",
-    "retime", "set_enabled", "cut_range",
+    "retime", "set_enabled", "cut_range", "set_cdl",
 })
 
 _MARKER_COLOR = {
@@ -362,6 +362,27 @@ class OtioMutator:
         clip, item = self._clip_and_item(op)
         item.enabled = bool(op.enabled)
         return f"{'enable' if op.enabled else 'disable'} {clip.name}"
+
+    def _set_cdl(self, op) -> str:
+        """Store an ASC CDL primary grade on the clip's OTIO metadata — the portable color channel.
+
+        CDL rides in ``metadata["filmgrip"]["cdl"]`` as plain SOP+sat numbers, so it survives the
+        OTIO round-trip and is the single source the CDL sidecar/FCPXML exporters read. (The live
+        Resolve adapter applies the same grade in-place via ``SetCDL``; here it persists in the file
+        the editor re-imports.)
+        """
+        clip, item = self._clip_and_item(op)
+        cdl = {
+            "slope": list(op.slope),
+            "offset": list(op.offset),
+            "power": list(op.power),
+            "saturation": float(op.saturation),
+        }
+        if op.color_space:
+            cdl["color_space"] = op.color_space
+        item.metadata.setdefault("filmgrip", {})["cdl"] = cdl
+        return (f"grade {clip.name} CDL sat {op.saturation:g}"
+                + (f" @{op.color_space}" if op.color_space else ""))
 
 
 class InterchangeAdapter(GrabAdapter):
