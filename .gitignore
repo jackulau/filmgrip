@@ -31,3 +31,6 @@ scratch/
 
 # Claude Code local state
 .claude/
+
+# per-goal scope marker (goal-state, not source)
+.goal-scope
