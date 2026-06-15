@@ -83,3 +83,66 @@ register(Pack("tighten-open", "Tighten the opening: trim slack off the head of t
               prompt="Tighten the open: trim up to {frames} frames off the head of the first "
                      "selected clip so it starts on the action. Keep everything else untouched.",
               params={"frames": 12}))
+
+
+# --- grade packs (color look presets) ----------------------------------------------------------
+# Deterministic creative looks compile to a portable `set_cdl` per selected clip — zero LLM, always
+# applicable (set_cdl is live in Resolve + carried in interchange). These are CDL PRIMARY
+# approximations of looks; a true split-tone look wants a 3D LUT (apply_lut), but a primary grade is
+# portable, re-editable, and gets most of the way. The ergonomic lift/gamma/gain controls compile to
+# CDL via filmgrip.color.lgg_to_cdl, so the recipe reads in colorist terms.
+
+def _grade_compiler(cdl):
+    def _compile(ir, ids, params):
+        d = cdl.to_dict()
+        return [{"op": "set_cdl", "clip_id": c.id, "slope": d["slope"], "offset": d["offset"],
+                 "power": d["power"], "saturation": d["saturation"]}
+                for c in selected_clips(ir, ids)]
+    return _compile
+
+
+def _register_look(name: str, description: str, cdl) -> None:
+    register(Pack(name, description, compile=_grade_compiler(cdl)))
+
+
+def _looks():
+    from ..color import lgg_to_cdl
+    _register_look(
+        "teal-orange",
+        "Cinematic teal-orange: warm highlights, cool shadows, punchy contrast (CDL primary "
+        "approximation — a 3D LUT does split-tone better).",
+        lgg_to_cdl(gain=(1.08, 1.0, 0.94), contrast=1.12, saturation=1.12))
+    _register_look(
+        "filmstock-warm",
+        "Warm filmstock emulation: lifted shadows, gentle warmth, mild saturation.",
+        lgg_to_cdl(lift=(0.02, 0.01, 0.0), gain=(1.05, 1.0, 0.96), saturation=1.05))
+    _register_look(
+        "bleach-bypass",
+        "High-contrast, low-saturation bleach-bypass look.",
+        lgg_to_cdl(contrast=1.4, saturation=0.45))
+    _register_look(
+        "day-for-night",
+        "Cool, darker day-for-night: blue cast, lowered mids and saturation.",
+        lgg_to_cdl(gain=(0.85, 0.95, 1.18), gamma=0.8, saturation=0.7))
+
+
+_looks()
+
+
+# Prompt grade packs — the planner reads the clip scopes (film-grip scopes) and emits CDL.
+register(Pack("neutral-balance",
+              "Neutralize color cast and set a clean mid exposure, read from the clip's scopes.",
+              kind="prompt",
+              prompt="Read the color scopes for the selected clips. Neutralize any color cast so "
+                     "neutrals are neutral and place mid-grey near {target_mid} (0–1). Emit a "
+                     "conservative set_cdl per clip; do not crush shadows or clip highlights, and "
+                     "keep saturation natural.",
+              params={"target_mid": "0.45"}))
+register(Pack("grade-match",
+              "Match the selected clips' color to a reference / hero clip using CDL.",
+              kind="prompt",
+              prompt="Match the color of the selected clips to the reference clip {ref}. Compare "
+                     "both clips' scopes (exposure, white balance, saturation, skin-tone), then emit "
+                     "set_cdl per clip (or apply_grade to copy the hero grade) so they match the "
+                     "reference within tolerance. Verify with the scopes after.",
+              params={"ref": ""}))
