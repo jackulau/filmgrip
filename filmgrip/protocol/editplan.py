@@ -358,11 +358,33 @@ class SetCDL(_Op):
         return key
 
 
+class ApplyLut(_Op):
+    """Apply a **LUT** (look-up table) to a clip — the baked *look* primitive CDL primaries can't
+    express (film emulation, camera→display transforms, creative looks).
+
+    A LUT is referenced by file: an absolute/relative ``path`` to a ``.cube`` (1D or 3D) or ``.3dl``,
+    or a bare name the editor resolves against its own LUT folder. film-grip validates an on-disk
+    file's shape (size keyword, row count, numeric rows) so a malformed or hallucinated path is
+    rejected before apply; a bare name is allowed with a warning (it can't be verified host-side).
+
+    Lands live in DaVinci Resolve via ``SetLUT(nodeIndex, path)`` (per node) and rides through OTIO
+    clip metadata for the interchange path. Honest limitation: a LUT is just a file — bare path
+    references break across machines, FCPXML carries it by name only, and AAF can't carry a 3D LUT
+    at all. Ship the ``.cube`` with the project or bake it; film-grip surfaces this, never hides it.
+    """
+    op: Literal["apply_lut"] = "apply_lut"
+    clip_id: str
+    path: str = Field(min_length=1, max_length=1024,
+                      description="path to a .cube/.3dl LUT, or a bare name in the editor's LUT folder")
+    node_index: int = Field(default=1, ge=1, le=128,
+                            description="1-based color-node the LUT attaches to (Resolve)")
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
         ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
-        SetCDL,
+        SetCDL, ApplyLut,
     ],
     Field(discriminator="op"),
 ]

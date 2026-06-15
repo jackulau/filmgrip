@@ -161,6 +161,57 @@
       "title": "AddTransition",
       "type": "object"
     },
+    "ApplyLut": {
+      "additionalProperties": false,
+      "description": "Apply a **LUT** (look-up table) to a clip \u2014 the baked *look* primitive CDL primaries can't\nexpress (film emulation, camera\u2192display transforms, creative looks).\n\nA LUT is referenced by file: an absolute/relative ``path`` to a ``.cube`` (1D or 3D) or ``.3dl``,\nor a bare name the editor resolves against its own LUT folder. film-grip validates an on-disk\nfile's shape (size keyword, row count, numeric rows) so a malformed or hallucinated path is\nrejected before apply; a bare name is allowed with a warning (it can't be verified host-side).\n\nLands live in DaVinci Resolve via ``SetLUT(nodeIndex, path)`` (per node) and rides through OTIO\nclip metadata for the interchange path. Honest limitation: a LUT is just a file \u2014 bare path\nreferences break across machines, FCPXML carries it by name only, and AAF can't carry a 3D LUT\nat all. Ship the ``.cube`` with the project or bake it; film-grip surfaces this, never hides it.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "apply_lut",
+          "default": "apply_lut",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "path to a .cube/.3dl LUT, or a bare name in the editor's LUT folder",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "node_index": {
+          "default": 1,
+          "description": "1-based color-node the LUT attaches to (Resolve)",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Node Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id",
+        "path"
+      ],
+      "title": "ApplyLut",
+      "type": "object"
+    },
     "CreateBin": {
       "additionalProperties": false,
       "description": "Create a media-pool bin/folder (organizing primitive).",
@@ -971,6 +1022,7 @@
             "add_marker": "#/$defs/AddMarker",
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
+            "apply_lut": "#/$defs/ApplyLut",
             "create_bin": "#/$defs/CreateBin",
             "cut_range": "#/$defs/CutRange",
             "delete": "#/$defs/Delete",
@@ -1043,6 +1095,9 @@
           },
           {
             "$ref": "#/$defs/SetCDL"
+          },
+          {
+            "$ref": "#/$defs/ApplyLut"
           }
         ]
       },

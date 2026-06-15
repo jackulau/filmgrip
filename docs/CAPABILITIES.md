@@ -37,3 +37,4 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | create_bin | yes | n/a | no |
 | move_to_bin | yes | n/a | no |
 | set_cdl | rebuild | yes | yes |
+| apply_lut | rebuild | yes | yes |

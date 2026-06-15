@@ -30,6 +30,8 @@ NOT_AUDIO_TRACK = "NOT_AUDIO_TRACK"
 NO_AUDIO_SOURCE = "NO_AUDIO_SOURCE"
 CUT_RANGE_ORDER = "CUT_RANGE_ORDER"
 CLIP_TIMEWARPED = "CLIP_TIMEWARPED"
+LUT_NOT_FOUND = "LUT_NOT_FOUND"
+LUT_INVALID = "LUT_INVALID"
 
 _TRANSITIONS_NEED_NEIGHBOR = {"cross_dissolve", "dip_to_color", "smooth_cut", "wipe"}
 
@@ -137,7 +139,8 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
-                    "split", "move_to_bin", "retime", "set_enabled", "cut_range", "set_cdl"):
+                    "split", "move_to_bin", "retime", "set_enabled", "cut_range", "set_cdl",
+                    "apply_lut"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -227,6 +230,25 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                         f"rippling cut_range ops on track {code} must be ordered last-to-first "
                         f"(this start {op.start_frame} ≥ previous {prev})", op.clip_id)
                 last_ripple_cut_start[code] = op.start_frame
+
+        elif name == "apply_lut":
+            # A hallucinated/malformed LUT path must not survive validation. An on-disk file is
+            # parsed + sanity-checked; a bare name (no separator, no .cube/.3dl) is allowed but
+            # warned (the editor resolves it against its own LUT folder — unverifiable here); a
+            # path-shaped reference that doesn't exist is a hard error.
+            from ..color.lut import LutError, inspect_lut, looks_like_bare_reference
+            import os as _os
+            if looks_like_bare_reference(op.path):
+                warn(LUT_NOT_FOUND, i, name,
+                     f"'{op.path}' is a bare LUT name — resolved by the editor's LUT folder, "
+                     f"not verifiable here; ensure it's installed", op.clip_id)
+            elif not _os.path.isfile(op.path):
+                err(LUT_NOT_FOUND, i, name, f"LUT file not found: {op.path}", op.clip_id)
+            else:
+                try:
+                    inspect_lut(op.path)
+                except LutError as exc:
+                    err(LUT_INVALID, i, name, str(exc), op.clip_id)
 
         elif name == "ripple":
             if op.track and not track_exists(op.track):
@@ -359,4 +381,7 @@ def _describe(op, ir: TimelineIR) -> str:
         cs = f" @{op.color_space}" if op.color_space else ""
         return (f"grade {nm(op.clip_id)} CDL slope{g(op.slope)} offset{g(op.offset)} "
                 f"power{g(op.power)} sat {op.saturation:g}{cs}")
+    if op.op == "apply_lut":
+        import os as _os
+        return f"apply LUT {_os.path.basename(op.path)} on {nm(op.clip_id)} (node {op.node_index})"
     return op.op
