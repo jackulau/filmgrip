@@ -65,6 +65,16 @@ AUDIO_PROPS_UNSUPPORTED: frozenset[str] = frozenset({
     "volume", "gain", "level", "fade_in", "fade_out", "pan", "mute", "solo",
 })
 
+# Color tools NO editor scripting API exposes — they are GUI-only in every NLE (Resolve's color
+# scripting reaches only CDL + LUT + groups/versions + DRX/copy). film-grip never claims to apply
+# these; the planner is told to describe them as a manual/advisory step (the color analog of
+# AUDIO_PROPS_UNSUPPORTED), never to fake them as an applied op.
+COLOR_ADVISORY: frozenset[str] = frozenset({
+    "primary wheels (lift/gamma/gain by value)", "log wheels", "custom curves",
+    "HSL qualifiers / secondaries", "Power Windows / masks", "Magic Mask",
+    "Auto Color / Color Match / Shot Match (AI)", "Color Warper", "HDR palette",
+})
+
 
 class _Op(BaseModel):
     model_config = ConfigDict(extra="forbid")  # reject unknown fields -> no smuggled instructions
