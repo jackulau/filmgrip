@@ -40,3 +40,4 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | apply_lut | yes | yes | yes |
 | color_group | yes | no | no |
 | color_version | yes | no | no |
+| apply_grade | yes | no | no |

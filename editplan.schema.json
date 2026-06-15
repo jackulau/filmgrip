@@ -161,6 +161,66 @@
       "title": "AddTransition",
       "type": "object"
     },
+    "ApplyGrade": {
+      "additionalProperties": false,
+      "description": "Propagate a grade to clips \u2014 the **match-this-shot** primitive.\n\nTwo sources (exactly one): ``from_clip`` copies a hero clip's full grade onto the targets\n(Resolve ``TimelineItem.CopyGrades``), or ``drx_path`` applies a saved PowerGrade ``.drx`` file\n(``Timeline.ApplyGradeFromDRX``). ``to_clips`` is the list of clip ids to grade.\n\n``grade_mode`` is the DRX keyframe-alignment mode (0 = no keyframes, 1 = align to source\ntimecode, 2 = align to start frames). Resolve-live only: copying a full grade / applying a DRX\nhas no portable interchange form, and (CDL being write-only) the targets' prior grades are\noverwritten and not restorable via the API \u2014 surfaced as a warning, never hidden.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "apply_grade",
+          "default": "apply_grade",
+          "title": "Op",
+          "type": "string"
+        },
+        "to_clips": {
+          "description": "clip ids to receive the grade",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "To Clips",
+          "type": "array"
+        },
+        "from_clip": {
+          "default": "",
+          "description": "hero clip id to copy the grade FROM",
+          "title": "From Clip",
+          "type": "string"
+        },
+        "drx_path": {
+          "default": "",
+          "description": "path to a saved PowerGrade .drx (alternative source)",
+          "title": "Drx Path",
+          "type": "string"
+        },
+        "grade_mode": {
+          "default": 0,
+          "description": "DRX keyframe alignment: 0 none, 1 source-TC, 2 start-frames",
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Grade Mode",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "to_clips"
+      ],
+      "title": "ApplyGrade",
+      "type": "object"
+    },
     "ApplyLut": {
       "additionalProperties": false,
       "description": "Apply a **LUT** (look-up table) to a clip \u2014 the baked *look* primitive CDL primaries can't\nexpress (film emulation, camera\u2192display transforms, creative looks).\n\nA LUT is referenced by file: an absolute/relative ``path`` to a ``.cube`` (1D or 3D) or ``.3dl``,\nor a bare name the editor resolves against its own LUT folder. film-grip validates an on-disk\nfile's shape (size keyword, row count, numeric rows) so a malformed or hallucinated path is\nrejected before apply; a bare name is allowed with a warning (it can't be verified host-side).\n\nLands live in DaVinci Resolve via ``SetLUT(nodeIndex, path)`` (per node) and rides through OTIO\nclip metadata for the interchange path. Honest limitation: a LUT is just a file \u2014 bare path\nreferences break across machines, FCPXML carries it by name only, and AAF can't carry a 3D LUT\nat all. Ship the ``.cube`` with the project or bake it; film-grip surfaces this, never hides it.",
@@ -1143,6 +1203,7 @@
             "add_marker": "#/$defs/AddMarker",
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
+            "apply_grade": "#/$defs/ApplyGrade",
             "apply_lut": "#/$defs/ApplyLut",
             "color_group": "#/$defs/ColorGroup",
             "color_version": "#/$defs/ColorVersion",
@@ -1227,6 +1288,9 @@
           },
           {
             "$ref": "#/$defs/ColorVersion"
+          },
+          {
+            "$ref": "#/$defs/ApplyGrade"
           }
         ]
       },

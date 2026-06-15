@@ -243,6 +243,10 @@ class FakeTimelineItem:
     def GetVersionNameList(self, version_type):
         return [n for (n, t) in self._versions if t == int(version_type)]
 
+    def CopyGrades(self, targets) -> bool:
+        self.calls.append(("CopyGrades", [t.GetName() if hasattr(t, "GetName") else t for t in targets]))
+        return True
+
     # NOTE: real Resolve TimelineItem has NO SetName — renaming goes through the MediaPoolItem's
     # "Clip Name" property. The fake omits SetName deliberately so tests match the live API.
 
@@ -269,6 +273,11 @@ class FakeTimeline:
     # -- reads ------------------------------------------------------------------
     def GetName(self) -> str:
         return self._name
+
+    def ApplyGradeFromDRX(self, path, grade_mode, items) -> bool:
+        self.calls.append(("ApplyGradeFromDRX", path, grade_mode,
+                           [i.GetName() if hasattr(i, "GetName") else i for i in items]))
+        return True
 
     def GetStartFrame(self) -> int:
         return self._start

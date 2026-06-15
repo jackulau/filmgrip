@@ -36,7 +36,7 @@ from .resolve_client import (
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
 LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled", "set_cdl", "apply_lut",
-                      "color_group", "color_version"})
+                      "color_group", "color_version", "apply_grade"})
 
 # Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
@@ -480,6 +480,8 @@ class ResolveAdapter(GrabAdapter):
             return self._create_bin(op, session)
         if op.op == "move_to_bin":
             return self._move_to_bin(op, ir, session)
+        if op.op == "apply_grade":
+            return self._apply_grade(op, ir, timeline)
 
         clip = ir.clip(op.clip_id)
         item = getattr(clip, "native", None)
@@ -564,6 +566,30 @@ class ResolveAdapter(GrabAdapter):
         inverse = ((lambda: _native_call(item, "AssignToColorGroup", old)) if old is not None
                    else (lambda: _native_call(item, "RemoveFromColorGroup")))
         return (f"assign {clip.name} → color group '{op.group}'", inverse, None)
+
+    def _apply_grade(self, op, ir: TimelineIR, timeline: Any):
+        """Propagate a grade onto target clips: copy a hero clip's grade (``CopyGrades``) or apply a
+        saved PowerGrade ``.drx`` (``ApplyGradeFromDRX``). No inverse — a DRX/copy overwrites the
+        targets' grades and (CDL being write-only) the prior grade can't be read back to restore."""
+        def native_of(cid: str, role: str):
+            c = ir.clip(cid)
+            it = getattr(c, "native", None) if c is not None else None
+            if it is None:
+                raise ResolveOperationFailed(f"no native handle for {role} clip '{cid}'")
+            return c, it
+
+        targets = [native_of(t, "target")[1] for t in op.to_clips]
+        warn = ("grade overwrite is not reversible via the API (CDL is write-only) — the targets' "
+                "prior grades are replaced")
+        if op.drx_path:
+            require(_native_call(timeline, "ApplyGradeFromDRX", op.drx_path, int(op.grade_mode), targets),
+                    f"ApplyGradeFromDRX '{op.drx_path}' failed")
+            return (f"apply PowerGrade {os.path.basename(op.drx_path)} → {len(targets)} clip(s)",
+                    None, warn)
+        src, src_item = native_of(op.from_clip, "source")
+        require(_native_call(src_item, "CopyGrades", targets),
+                f"CopyGrades from '{src.name}' failed")
+        return (f"copy grade from {src.name} → {len(targets)} clip(s)", None, warn)
 
     def _apply_color_version(self, op, clip, item):
         """Add or load a named color version (Resolve's alternate-grade slots). versionType: 0=local,

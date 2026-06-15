@@ -32,6 +32,7 @@ CUT_RANGE_ORDER = "CUT_RANGE_ORDER"
 CLIP_TIMEWARPED = "CLIP_TIMEWARPED"
 LUT_NOT_FOUND = "LUT_NOT_FOUND"
 LUT_INVALID = "LUT_INVALID"
+DRX_NOT_FOUND = "DRX_NOT_FOUND"
 
 _TRANSITIONS_NEED_NEIGHBOR = {"cross_dissolve", "dip_to_color", "smooth_cut", "wipe"}
 
@@ -250,6 +251,26 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                 except LutError as exc:
                     err(LUT_INVALID, i, name, str(exc), op.clip_id)
 
+        elif name == "apply_grade":
+            import os as _os
+            for tid in op.to_clips:
+                tc = ir.clip(tid)
+                if tc is None:
+                    err(UNKNOWN_CLIP, i, name, f"no target clip '{tid}'", tid)
+                elif tc.kind != "clip":
+                    err(NOT_A_CLIP, i, name, f"target '{tid}' is a {tc.kind}, not a clip", tid)
+            if op.from_clip:
+                fc = ir.clip(op.from_clip)
+                if fc is None:
+                    err(UNKNOWN_CLIP, i, name, f"no source clip '{op.from_clip}'", op.from_clip)
+                elif fc.kind != "clip":
+                    err(NOT_A_CLIP, i, name, f"source '{op.from_clip}' is not a clip", op.from_clip)
+            if op.drx_path:
+                if not op.drx_path.lower().endswith(".drx"):
+                    err(DRX_NOT_FOUND, i, name, f"grade source must be a .drx file: {op.drx_path}")
+                elif not _os.path.isfile(op.drx_path):
+                    err(DRX_NOT_FOUND, i, name, f"PowerGrade .drx not found: {op.drx_path}")
+
         elif name == "ripple":
             if op.track and not track_exists(op.track):
                 err(TRACK_NOT_FOUND, i, name, f"track '{op.track}' does not exist", None)
@@ -389,4 +410,8 @@ def _describe(op, ir: TimelineIR) -> str:
         return f"{verb} color group {op.group!r}: {nm(op.clip_id)}"
     if op.op == "color_version":
         return f"{op.action} color version {op.name!r} ({op.version_type}) on {nm(op.clip_id)}"
+    if op.op == "apply_grade":
+        import os as _os
+        src = f"DRX {_os.path.basename(op.drx_path)}" if op.drx_path else f"grade of {nm(op.from_clip)}"
+        return f"apply {src} → {len(op.to_clips)} clip(s)"
     return op.op

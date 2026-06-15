@@ -412,11 +412,39 @@ class ColorVersion(_Op):
     version_type: Literal["local", "remote"] = "local"
 
 
+class ApplyGrade(_Op):
+    """Propagate a grade to clips — the **match-this-shot** primitive.
+
+    Two sources (exactly one): ``from_clip`` copies a hero clip's full grade onto the targets
+    (Resolve ``TimelineItem.CopyGrades``), or ``drx_path`` applies a saved PowerGrade ``.drx`` file
+    (``Timeline.ApplyGradeFromDRX``). ``to_clips`` is the list of clip ids to grade.
+
+    ``grade_mode`` is the DRX keyframe-alignment mode (0 = no keyframes, 1 = align to source
+    timecode, 2 = align to start frames). Resolve-live only: copying a full grade / applying a DRX
+    has no portable interchange form, and (CDL being write-only) the targets' prior grades are
+    overwritten and not restorable via the API — surfaced as a warning, never hidden.
+    """
+    op: Literal["apply_grade"] = "apply_grade"
+    to_clips: list[str] = Field(min_length=1, description="clip ids to receive the grade")
+    from_clip: str = Field(default="", description="hero clip id to copy the grade FROM")
+    drx_path: str = Field(default="", description="path to a saved PowerGrade .drx (alternative source)")
+    grade_mode: int = Field(default=0, ge=0, le=2,
+                            description="DRX keyframe alignment: 0 none, 1 source-TC, 2 start-frames")
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "ApplyGrade":
+        has_clip = bool(self.from_clip)
+        has_drx = bool(self.drx_path)
+        if has_clip == has_drx:
+            raise ValueError("apply_grade needs exactly one source: 'from_clip' OR 'drx_path'")
+        return self
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
         ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
-        SetCDL, ApplyLut, ColorGroup, ColorVersion,
+        SetCDL, ApplyLut, ColorGroup, ColorVersion, ApplyGrade,
     ],
     Field(discriminator="op"),
 ]
