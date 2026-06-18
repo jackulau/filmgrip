@@ -131,14 +131,40 @@ def payload_view_frames(ctx: PlannerContext, ids: Optional[list[str]] = None,
     }
 
 
+def payload_get_scopes(ctx: PlannerContext, ids: Optional[list[str]] = None) -> dict:
+    """Color scopes per clip (parade/waveform/vectorscope/white-balance/exposure) — the perception
+    an agent reads to PROPOSE a grade and re-reads to VERIFY it. Pull-on-demand: paid only when the
+    instruction is about color. Per-clip failures (no ffmpeg/numpy, offline media) come back in
+    ``errors`` — never a fabricated reading."""
+    from ..perception.align import media_path_of
+    from ..perception.scopes import analyze_frame
+    from ..perception.transcribe import PerceptionUnavailable
+
+    target = ids if ids else list(ctx.selection.ids)
+    clips, errors = [], []
+    for cid in target:
+        c = ctx.ir.clip(cid)
+        if c is None or c.kind != "clip":
+            continue
+        try:
+            at_s = c.source_start / ctx.ir.rate if ctx.ir.rate else 0.0
+            rep = analyze_frame(media_path_of(c), at_s)
+            rep["clip_id"] = cid
+            clips.append(rep)
+        except PerceptionUnavailable as exc:
+            errors.append(f"{c.name}: {exc}")
+    return {"clips": clips, "errors": errors}
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
-    ops = ("trim, move, insert, delete, set_property, set_enabled, add_marker, add_transition, "
-           "split, ripple, retime, cut_range, import_audio, add_track, rename_track, create_bin, "
-           "move_to_bin")
+    # Derived from the schema itself (single source of truth) so a newly-added op is taught to the
+    # planner automatically — the same no-drift guarantee the honesty gate enforces on the op table.
+    ops = ", ".join(ep.all_op_names())
     props = ", ".join(sorted(ep.ALLOWED_PROPERTIES))
     no_audio = ", ".join(sorted(ep.AUDIO_PROPS_UNSUPPORTED))
+    color_advisory = ", ".join(sorted(ep.COLOR_ADVISORY))
     return (
         "You are film-grip's video-editing planner. The user selected clips in their editor and "
         "gave a natural-language instruction. Produce an EditPlan: a list of typed ops over STABLE "
@@ -157,6 +183,18 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "step.\n"
         "Organizing: add_track / rename_track / create_bin / move_to_bin tidy tracks and media-pool "
         "bins.\n"
+        "Color grading: set_cdl applies an ASC CDL primary grade (slope/offset/power per RGB + "
+        "saturation; identity = slope[1,1,1] offset[0,0,0] power[1,1,1] sat 1) — think in "
+        "lift/gamma/gain and convert (gain→slope, lift→offset, gamma→power=1/gamma). apply_lut "
+        "attaches a .cube/.3dl LUT (a baked look). color_group puts clips in a shared color group; "
+        "color_version adds/loads alternate grades; apply_grade copies a hero clip's grade onto "
+        "targets (from_clip) or applies a saved PowerGrade .drx (drx_path) — the match-this-shot "
+        "primitive. To SEE color before/after grading, call get_scopes(ids): RGB parade, luma "
+        "waveform (clip/crush flags), vectorscope (hue/saturation + skin-tone delta), white-balance "
+        "cast, and exposure — perceive→propose set_cdl→verify against the scopes. CDL is portable; "
+        "declare color_space when grading log footage. These color tools are GUI-only in every NLE "
+        f"and are NOT scriptable — never emit or claim them: {color_advisory}. If asked for one, do "
+        "the closest CDL/LUT grade and note the rest as a manual step.\n"
         "Speed/visibility: retime sets a clip's speed_percent (200=2x faster, 50=half, negative="
         "reverse, 0=freeze-frame); set_enabled enables/disables a clip without deleting it. retime "
         "warps playback within the clip's existing span — add a ripple if you want the gap closed.\n"
@@ -305,14 +343,22 @@ def build_mcp_server(ctx: PlannerContext):
         return _text(payload_view_frames(ctx, args.get("ids"), args.get("frames"),
                                          count=int(args.get("count", 8))))
 
+    @tool("get_scopes", "Color scopes for clips (RGB parade, luma waveform with clip/crush flags, "
+          "vectorscope hue/saturation + skin-tone delta, white-balance cast, exposure) — read these "
+          "to propose a grade and to verify one landed.",
+          {"ids": list}, read_only)
+    async def get_scopes(args):  # pragma: no cover
+        return _text(payload_get_scopes(ctx, args.get("ids")))
+
     return create_sdk_mcp_server("filmgrip", "0.1.0",
                                  [get_selection, get_context, query_clips, get_transcript,
-                                  analyze_speech, view_frames])
+                                  analyze_speech, view_frames, get_scopes])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
              "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript",
-             "mcp__filmgrip__analyze_speech", "mcp__filmgrip__view_frames"]
+             "mcp__filmgrip__analyze_speech", "mcp__filmgrip__view_frames",
+             "mcp__filmgrip__get_scopes"]
 
 
 class ClaudeAgentTransport(Transport):

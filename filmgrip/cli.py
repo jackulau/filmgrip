@@ -84,6 +84,14 @@ def build_parser() -> argparse.ArgumentParser:
     fr.add_argument("--count", type=int, default=8, help="tiles per clip sheet (default 8)")
     fr.add_argument("--out", help="copy the (single) resulting sheet to this path")
 
+    sc = sub.add_parser("scopes", help="synthesize color scopes (parade/waveform/vectorscope/"
+                                       "white-balance/exposure) as JSON for a media file or clips")
+    sc.add_argument("--media", help="analyze one media file directly")
+    sc.add_argument("--at", default="0", help="time in seconds to sample (default: 0)")
+    sc.add_argument("--fixture", help="analyze clips of a timeline file instead (per-clip JSON)")
+    sc.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
+    sc.add_argument("--png", help="also render a visual scope image (waveform+vectorscope+histogram)")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
@@ -126,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_frames import cmd_frames
 
         return cmd_frames(args)
+    if args.command == "scopes":
+        from .cli_scopes import cmd_scopes
+
+        return cmd_scopes(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 

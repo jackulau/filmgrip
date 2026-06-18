@@ -19,13 +19,16 @@ patch. film-grip's equivalent is **one universal IR + one typed protocol + thin 
   primitives that reference **stable clip IDs**. Hallucinated IDs/frames can't survive validation.
   - *edit / cut*: `trim` · `move` · `insert` · `split` · `cut_range` (carve a frame range out of a clip — the silence/filler primitive) · `ripple` · `delete` (ripple-delete closes the gap) · `retime` (speed up / slow down / reverse / freeze-frame)
   - *audio / SFX*: `import_audio` — drop a sound effect from your library onto an audio track · audio-aware `insert`
+  - *color / grade*: `set_cdl` (ASC CDL primary grade — the portable color pivot) · `apply_lut` (a `.cube`/`.3dl` look) · `color_group` (one grade drives many clips) · `color_version` (alternate grades) · `apply_grade` (copy a hero grade / apply a `.drx` PowerGrade — the match-this-shot primitive). See [docs/COLOR.md](docs/COLOR.md).
   - *organize*: `add_track` · `rename_track` · `create_bin` · `move_to_bin`
   - *annotate / state*: `add_marker` · `set_property` · `set_enabled` (enable / disable a clip without deleting it) · `add_transition`
   - every op also takes optional `reason` / `quote` rationale — the edit explains itself in the diff and in OTIO metadata
 - **Perception** — the agent can *hear and see* the footage, pull-on-demand: word-level
   transcripts aligned to **timeline frames** ("cut after she says *perception*"), deterministic
-  silence/filler analysis, ffmpeg contact sheets (filmstrip + waveform), and a post-apply
-  verification loop. See [docs/PERCEPTION.md](docs/PERCEPTION.md).
+  silence/filler analysis, ffmpeg contact sheets (filmstrip + waveform), **color scopes** (RGB
+  parade / waveform / vectorscope / white-balance / exposure — the grading read Resolve's API won't
+  give an agent), and a post-apply verification loop for both cuts and grades.
+  See [docs/PERCEPTION.md](docs/PERCEPTION.md) and [docs/COLOR.md](docs/COLOR.md).
 - **FGX serializer** — a token-frugal projection (integer frames, abbreviated rows, selected
   subgraph + 1-hop neighbors, media by reference, multi-turn deltas). A selection that is
   multiple kilobytes of raw FCPXML becomes a few hundred tokens.
@@ -151,6 +154,32 @@ you want the gap closed).
 `set_enabled` mutes a clip without deleting it — *"disable the second take"* — and applies **live**
 in Resolve (`SetClipEnabled`) as well as through the rebuild. Run `film-grip editors` for the
 per-op, per-editor matrix so you always know which edits land where.
+
+## Color grading — grade, not just cut
+
+film-grip grades the way it cuts. The pivot is **ASC CDL** — ten numbers (slope/offset/power per
+RGB + saturation) that carry the color *decision*, so the same grade lands live in DaVinci Resolve
+(`TimelineItem.SetCDL`) **and** travels through `.cc`/`.ccc`/`.cdl` sidecars, EDL and FCPXML. Ask in
+plain language — *"warm it up and add contrast"*, *"match this shot to the hero"*, *"give it a
+teal-orange look"* — and the agent reasons in lift/gamma/gain while film-grip compiles to portable,
+validated CDL. `apply_lut` adds a baked `.cube`/`.3dl` look; `color_group` drives many clips from one
+grade; `apply_grade` copies a hero grade or applies a saved `.drx` PowerGrade.
+
+The hard part is **perception**: Resolve exposes no scope API, so film-grip synthesizes its own from
+the pixels — RGB parade, luma waveform (clip/crush flags), vectorscope (hue/saturation + skin-tone
+delta), white-balance cast, exposure. The agent reads them to *propose* a grade and re-reads them to
+*verify* it — `perceive → propose → apply → verify → iterate`, the loop that the consumer text→LUT
+generators skip:
+
+```bash
+film-grip scopes --media shot.mov --at 1.5     # the colorist's read, as JSON
+film-grip pack apply teal-orange --fixture timeline.otio
+```
+
+**Honest by construction:** Resolve's color API reaches only CDL + LUT + groups/versions + DRX/copy.
+Primary wheels by value, curves, qualifiers, Power Windows, Magic Mask and the AI color tools are
+GUI-only in every NLE — film-grip surfaces those as advisory steps, never fakes them as applied
+edits. Full model + the scriptable-vs-advisory line: **[docs/COLOR.md](docs/COLOR.md)**.
 
 ## A panel inside Resolve
 

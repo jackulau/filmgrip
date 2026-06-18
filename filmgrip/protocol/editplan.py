@@ -21,7 +21,16 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 3  # v2 added audio + organize ops; v3 adds cut_range and per-op reason/quote rationale
+SCHEMA_VERSION = 4  # v2 added audio + organize ops; v3 added cut_range + per-op rationale; v4 adds color grading (set_cdl …)
+
+# Working color spaces a grade may declare. CDL itself carries NO working space — the same numbers
+# look different in log vs display-referred footage — so film-grip lets a grade name its intended
+# space honestly rather than silently assuming one. "" = unspecified (use the project's space).
+COLOR_SPACES: frozenset[str] = frozenset({
+    "", "rec709", "rec2020", "srgb", "aces", "acescct", "acescc", "davinci_wide_gamut",
+    "arri_logc3", "arri_logc4", "sony_slog3", "red_log3g10", "blackmagic_film_gen5",
+    "panasonic_vlog", "canon_clog3", "linear",
+})
 
 # Properties an adapter is allowed to set. Anything outside this set is rejected at parse time —
 # Claude cannot invent a destructive or unsupported property key. Adapters map these to their
@@ -54,6 +63,16 @@ TRANSITION_TYPES: frozenset[str] = frozenset({
 # dropped. A user asking to "lower the volume" is told it's a manual step, not given a false success.
 AUDIO_PROPS_UNSUPPORTED: frozenset[str] = frozenset({
     "volume", "gain", "level", "fade_in", "fade_out", "pan", "mute", "solo",
+})
+
+# Color tools NO editor scripting API exposes — they are GUI-only in every NLE (Resolve's color
+# scripting reaches only CDL + LUT + groups/versions + DRX/copy). film-grip never claims to apply
+# these; the planner is told to describe them as a manual/advisory step (the color analog of
+# AUDIO_PROPS_UNSUPPORTED), never to fake them as an applied op.
+COLOR_ADVISORY: frozenset[str] = frozenset({
+    "primary wheels (lift/gamma/gain by value)", "log wheels", "custom curves",
+    "HSL qualifiers / secondaries", "Power Windows / masks", "Magic Mask",
+    "Auto Color / Color Match / Shot Match (AI)", "Color Warper", "HDR palette",
 })
 
 
@@ -286,10 +305,156 @@ class CutRange(_Op):
         return self
 
 
+def _triple_in_range(name: str, lo: Optional[float], hi: Optional[float]):
+    """Build a validator that enforces an SOP field is exactly 3 floats, each within [lo, hi]."""
+    def _check(v: list[float]) -> list[float]:
+        vals = list(v)
+        if len(vals) != 3:
+            raise ValueError(f"{name} must be exactly 3 values (r, g, b), got {len(vals)}")
+        out = []
+        for ch in vals:
+            f = float(ch)
+            if lo is not None and f < lo:
+                raise ValueError(f"{name} value {f} below minimum {lo}")
+            if hi is not None and f > hi:
+                raise ValueError(f"{name} value {f} above maximum {hi}")
+            out.append(f)
+        return out
+    return _check
+
+
+class SetCDL(_Op):
+    """Apply an **ASC CDL** primary grade to a clip — film-grip's portable color primitive.
+
+    Ten numbers: ``slope``/``offset``/``power`` per RGB channel (SOP) + a ``saturation`` scalar.
+    This carries the *decision*, not an editor's node graph, so the SAME grade lands live in
+    DaVinci Resolve (``TimelineItem.SetCDL`` per node), rides through OTIO clip metadata, and
+    exports to ``.cdl``/``.cc`` sidecars + FCPXML ``info-asc-cdl`` — portable across every adapter.
+
+    Identity grade (no-op): ``slope=[1,1,1] offset=[0,0,0] power=[1,1,1] saturation=1``. Math is
+    ``out = (max(0, in*slope + offset))**power`` then saturation about Rec.709 luma. ``power`` must
+    be > 0; ``slope`` and ``saturation`` >= 0; ``offset`` is unbounded by the standard. CDL carries
+    no working space, so declare ``color_space`` when the footage isn't already in the grade's
+    intended space (e.g. grading log footage) — film-grip surfaces it rather than guessing.
+
+    Colorist controls (lift/gamma/gain/contrast/temp/tint) compile to this via
+    ``filmgrip.color.lgg_to_cdl`` — emit raw SOP here, or let a grade pack / the ``film-grip grade``
+    CLI do the lowering. Richer color work (curves, qualifiers, Power Windows, Magic Mask) is
+    GUI-only in every NLE and is surfaced as an advisory step, never silently applied.
+    """
+    op: Literal["set_cdl"] = "set_cdl"
+    clip_id: str
+    slope: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0],
+                               description="RGB multiplicative gain (>=0); identity = [1,1,1]")
+    offset: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0],
+                                description="RGB additive lift; identity = [0,0,0]")
+    power: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0],
+                               description="RGB gamma exponent (>0); identity = [1,1,1]")
+    saturation: float = Field(default=1.0, ge=0.0, le=4.0,
+                              description="1 = unchanged, 0 = greyscale, >1 boosts")
+    node_index: int = Field(default=1, ge=1, le=128,
+                            description="1-based color node the grade lands on in Resolve")
+    color_space: str = Field(default="", max_length=40,
+                             description="intended working space (CDL declares none); '' = project default")
+
+    _v_slope = field_validator("slope")(_triple_in_range("slope", 0.0, 100.0))
+    _v_offset = field_validator("offset")(_triple_in_range("offset", -10.0, 10.0))
+    _v_power = field_validator("power")(_triple_in_range("power", 1e-6, 100.0))
+
+    @field_validator("color_space")
+    @classmethod
+    def _space_known(cls, v: str) -> str:
+        key = v.strip().lower()
+        if key not in COLOR_SPACES:
+            raise ValueError(f"unknown color_space '{v}'; one of {sorted(c for c in COLOR_SPACES if c)}")
+        return key
+
+
+class ApplyLut(_Op):
+    """Apply a **LUT** (look-up table) to a clip — the baked *look* primitive CDL primaries can't
+    express (film emulation, camera→display transforms, creative looks).
+
+    A LUT is referenced by file: an absolute/relative ``path`` to a ``.cube`` (1D or 3D) or ``.3dl``,
+    or a bare name the editor resolves against its own LUT folder. film-grip validates an on-disk
+    file's shape (size keyword, row count, numeric rows) so a malformed or hallucinated path is
+    rejected before apply; a bare name is allowed with a warning (it can't be verified host-side).
+
+    Lands live in DaVinci Resolve via ``SetLUT(nodeIndex, path)`` (per node) and rides through OTIO
+    clip metadata for the interchange path. Honest limitation: a LUT is just a file — bare path
+    references break across machines, FCPXML carries it by name only, and AAF can't carry a 3D LUT
+    at all. Ship the ``.cube`` with the project or bake it; film-grip surfaces this, never hides it.
+    """
+    op: Literal["apply_lut"] = "apply_lut"
+    clip_id: str
+    path: str = Field(min_length=1, max_length=1024,
+                      description="path to a .cube/.3dl LUT, or a bare name in the editor's LUT folder")
+    node_index: int = Field(default=1, ge=1, le=128,
+                            description="1-based color-node the LUT attaches to (Resolve)")
+
+
+class ColorGroup(_Op):
+    """Assign a clip to a named DaVinci Resolve **color group** (or remove it) — the
+    organize-grades-together primitive (the color-side analog of ``create_bin``/``move_to_bin``).
+
+    A color group shares pre- and post-clip grade nodes across every member clip, so one grade
+    drives a whole set of shots (an interview's A-cam, all the night exteriors). film-grip creates
+    the group if it doesn't exist, then assigns the clip. This is a **Resolve-live** concept with no
+    interchange equivalent — declared honestly as live-only (a file editor gets nothing).
+    """
+    op: Literal["color_group"] = "color_group"
+    clip_id: str
+    group: str = Field(min_length=1, max_length=120, description="color-group name (created if absent)")
+    action: Literal["assign", "remove"] = "assign"
+
+
+class ColorVersion(_Op):
+    """Add or load a named **color version** on a clip — Resolve's alternate-grade slots (e.g. a
+    'client' vs 'director' grade on the same shot).
+
+    ``action='add'`` creates the version; ``'load'`` switches the clip to it. ``version_type`` is
+    local or remote (Resolve's two version scopes). Resolve-live only — color versions have no
+    portable interchange form.
+    """
+    op: Literal["color_version"] = "color_version"
+    clip_id: str
+    name: str = Field(min_length=1, max_length=120, description="version name")
+    action: Literal["add", "load"] = "add"
+    version_type: Literal["local", "remote"] = "local"
+
+
+class ApplyGrade(_Op):
+    """Propagate a grade to clips — the **match-this-shot** primitive.
+
+    Two sources (exactly one): ``from_clip`` copies a hero clip's full grade onto the targets
+    (Resolve ``TimelineItem.CopyGrades``), or ``drx_path`` applies a saved PowerGrade ``.drx`` file
+    (``Timeline.ApplyGradeFromDRX``). ``to_clips`` is the list of clip ids to grade.
+
+    ``grade_mode`` is the DRX keyframe-alignment mode (0 = no keyframes, 1 = align to source
+    timecode, 2 = align to start frames). Resolve-live only: copying a full grade / applying a DRX
+    has no portable interchange form, and (CDL being write-only) the targets' prior grades are
+    overwritten and not restorable via the API — surfaced as a warning, never hidden.
+    """
+    op: Literal["apply_grade"] = "apply_grade"
+    to_clips: list[str] = Field(min_length=1, description="clip ids to receive the grade")
+    from_clip: str = Field(default="", description="hero clip id to copy the grade FROM")
+    drx_path: str = Field(default="", description="path to a saved PowerGrade .drx (alternative source)")
+    grade_mode: int = Field(default=0, ge=0, le=2,
+                            description="DRX keyframe alignment: 0 none, 1 source-TC, 2 start-frames")
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "ApplyGrade":
+        has_clip = bool(self.from_clip)
+        has_drx = bool(self.drx_path)
+        if has_clip == has_drx:
+            raise ValueError("apply_grade needs exactly one source: 'from_clip' OR 'drx_path'")
+        return self
+
+
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
         ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
+        SetCDL, ApplyLut, ColorGroup, ColorVersion, ApplyGrade,
     ],
     Field(discriminator="op"),
 ]

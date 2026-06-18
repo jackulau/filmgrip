@@ -161,6 +161,230 @@
       "title": "AddTransition",
       "type": "object"
     },
+    "ApplyGrade": {
+      "additionalProperties": false,
+      "description": "Propagate a grade to clips \u2014 the **match-this-shot** primitive.\n\nTwo sources (exactly one): ``from_clip`` copies a hero clip's full grade onto the targets\n(Resolve ``TimelineItem.CopyGrades``), or ``drx_path`` applies a saved PowerGrade ``.drx`` file\n(``Timeline.ApplyGradeFromDRX``). ``to_clips`` is the list of clip ids to grade.\n\n``grade_mode`` is the DRX keyframe-alignment mode (0 = no keyframes, 1 = align to source\ntimecode, 2 = align to start frames). Resolve-live only: copying a full grade / applying a DRX\nhas no portable interchange form, and (CDL being write-only) the targets' prior grades are\noverwritten and not restorable via the API \u2014 surfaced as a warning, never hidden.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "apply_grade",
+          "default": "apply_grade",
+          "title": "Op",
+          "type": "string"
+        },
+        "to_clips": {
+          "description": "clip ids to receive the grade",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "To Clips",
+          "type": "array"
+        },
+        "from_clip": {
+          "default": "",
+          "description": "hero clip id to copy the grade FROM",
+          "title": "From Clip",
+          "type": "string"
+        },
+        "drx_path": {
+          "default": "",
+          "description": "path to a saved PowerGrade .drx (alternative source)",
+          "title": "Drx Path",
+          "type": "string"
+        },
+        "grade_mode": {
+          "default": 0,
+          "description": "DRX keyframe alignment: 0 none, 1 source-TC, 2 start-frames",
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Grade Mode",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "to_clips"
+      ],
+      "title": "ApplyGrade",
+      "type": "object"
+    },
+    "ApplyLut": {
+      "additionalProperties": false,
+      "description": "Apply a **LUT** (look-up table) to a clip \u2014 the baked *look* primitive CDL primaries can't\nexpress (film emulation, camera\u2192display transforms, creative looks).\n\nA LUT is referenced by file: an absolute/relative ``path`` to a ``.cube`` (1D or 3D) or ``.3dl``,\nor a bare name the editor resolves against its own LUT folder. film-grip validates an on-disk\nfile's shape (size keyword, row count, numeric rows) so a malformed or hallucinated path is\nrejected before apply; a bare name is allowed with a warning (it can't be verified host-side).\n\nLands live in DaVinci Resolve via ``SetLUT(nodeIndex, path)`` (per node) and rides through OTIO\nclip metadata for the interchange path. Honest limitation: a LUT is just a file \u2014 bare path\nreferences break across machines, FCPXML carries it by name only, and AAF can't carry a 3D LUT\nat all. Ship the ``.cube`` with the project or bake it; film-grip surfaces this, never hides it.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "apply_lut",
+          "default": "apply_lut",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "path to a .cube/.3dl LUT, or a bare name in the editor's LUT folder",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "node_index": {
+          "default": 1,
+          "description": "1-based color-node the LUT attaches to (Resolve)",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Node Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id",
+        "path"
+      ],
+      "title": "ApplyLut",
+      "type": "object"
+    },
+    "ColorGroup": {
+      "additionalProperties": false,
+      "description": "Assign a clip to a named DaVinci Resolve **color group** (or remove it) \u2014 the\norganize-grades-together primitive (the color-side analog of ``create_bin``/``move_to_bin``).\n\nA color group shares pre- and post-clip grade nodes across every member clip, so one grade\ndrives a whole set of shots (an interview's A-cam, all the night exteriors). film-grip creates\nthe group if it doesn't exist, then assigns the clip. This is a **Resolve-live** concept with no\ninterchange equivalent \u2014 declared honestly as live-only (a file editor gets nothing).",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "color_group",
+          "default": "color_group",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "group": {
+          "description": "color-group name (created if absent)",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Group",
+          "type": "string"
+        },
+        "action": {
+          "default": "assign",
+          "enum": [
+            "assign",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id",
+        "group"
+      ],
+      "title": "ColorGroup",
+      "type": "object"
+    },
+    "ColorVersion": {
+      "additionalProperties": false,
+      "description": "Add or load a named **color version** on a clip \u2014 Resolve's alternate-grade slots (e.g. a\n'client' vs 'director' grade on the same shot).\n\n``action='add'`` creates the version; ``'load'`` switches the clip to it. ``version_type`` is\nlocal or remote (Resolve's two version scopes). Resolve-live only \u2014 color versions have no\nportable interchange form.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "color_version",
+          "default": "color_version",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "version name",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "action": {
+          "default": "add",
+          "enum": [
+            "add",
+            "load"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "version_type": {
+          "default": "local",
+          "enum": [
+            "local",
+            "remote"
+          ],
+          "title": "Version Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id",
+        "name"
+      ],
+      "title": "ColorVersion",
+      "type": "object"
+    },
     "CreateBin": {
       "additionalProperties": false,
       "description": "Create a media-pool bin/folder (organizing primitive).",
@@ -684,6 +908,88 @@
       "title": "Ripple",
       "type": "object"
     },
+    "SetCDL": {
+      "additionalProperties": false,
+      "description": "Apply an **ASC CDL** primary grade to a clip \u2014 film-grip's portable color primitive.\n\nTen numbers: ``slope``/``offset``/``power`` per RGB channel (SOP) + a ``saturation`` scalar.\nThis carries the *decision*, not an editor's node graph, so the SAME grade lands live in\nDaVinci Resolve (``TimelineItem.SetCDL`` per node), rides through OTIO clip metadata, and\nexports to ``.cdl``/``.cc`` sidecars + FCPXML ``info-asc-cdl`` \u2014 portable across every adapter.\n\nIdentity grade (no-op): ``slope=[1,1,1] offset=[0,0,0] power=[1,1,1] saturation=1``. Math is\n``out = (max(0, in*slope + offset))**power`` then saturation about Rec.709 luma. ``power`` must\nbe > 0; ``slope`` and ``saturation`` >= 0; ``offset`` is unbounded by the standard. CDL carries\nno working space, so declare ``color_space`` when the footage isn't already in the grade's\nintended space (e.g. grading log footage) \u2014 film-grip surfaces it rather than guessing.\n\nColorist controls (lift/gamma/gain/contrast/temp/tint) compile to this via\n``filmgrip.color.lgg_to_cdl`` \u2014 emit raw SOP here, or let a grade pack / the ``film-grip grade``\nCLI do the lowering. Richer color work (curves, qualifiers, Power Windows, Magic Mask) is\nGUI-only in every NLE and is surfaced as an advisory step, never silently applied.",
+      "properties": {
+        "reason": {
+          "default": "",
+          "description": "why this edit (optional; shown in diffs and stored on the clip)",
+          "maxLength": 200,
+          "title": "Reason",
+          "type": "string"
+        },
+        "quote": {
+          "default": "",
+          "description": "the spoken words this op anchors to (optional)",
+          "maxLength": 200,
+          "title": "Quote",
+          "type": "string"
+        },
+        "op": {
+          "const": "set_cdl",
+          "default": "set_cdl",
+          "title": "Op",
+          "type": "string"
+        },
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "slope": {
+          "description": "RGB multiplicative gain (>=0); identity = [1,1,1]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Slope",
+          "type": "array"
+        },
+        "offset": {
+          "description": "RGB additive lift; identity = [0,0,0]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Offset",
+          "type": "array"
+        },
+        "power": {
+          "description": "RGB gamma exponent (>0); identity = [1,1,1]",
+          "items": {
+            "type": "number"
+          },
+          "title": "Power",
+          "type": "array"
+        },
+        "saturation": {
+          "default": 1.0,
+          "description": "1 = unchanged, 0 = greyscale, >1 boosts",
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Saturation",
+          "type": "number"
+        },
+        "node_index": {
+          "default": 1,
+          "description": "1-based color node the grade lands on in Resolve",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Node Index",
+          "type": "integer"
+        },
+        "color_space": {
+          "default": "",
+          "description": "intended working space (CDL declares none); '' = project default",
+          "maxLength": 40,
+          "title": "Color Space",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "SetCDL",
+      "type": "object"
+    },
     "SetEnabled": {
       "additionalProperties": false,
       "description": "Enable or disable a clip without removing it (a disabled clip stays on the timeline but is\nskipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO\nrebuild (the clip's ``enabled`` flag).",
@@ -879,7 +1185,7 @@
   "description": "An ordered list of typed ops plus an optional one-line rationale.",
   "properties": {
     "version": {
-      "default": 3,
+      "default": 4,
       "title": "Version",
       "type": "integer"
     },
@@ -897,6 +1203,10 @@
             "add_marker": "#/$defs/AddMarker",
             "add_track": "#/$defs/AddTrack",
             "add_transition": "#/$defs/AddTransition",
+            "apply_grade": "#/$defs/ApplyGrade",
+            "apply_lut": "#/$defs/ApplyLut",
+            "color_group": "#/$defs/ColorGroup",
+            "color_version": "#/$defs/ColorVersion",
             "create_bin": "#/$defs/CreateBin",
             "cut_range": "#/$defs/CutRange",
             "delete": "#/$defs/Delete",
@@ -907,6 +1217,7 @@
             "rename_track": "#/$defs/RenameTrack",
             "retime": "#/$defs/Retime",
             "ripple": "#/$defs/Ripple",
+            "set_cdl": "#/$defs/SetCDL",
             "set_enabled": "#/$defs/SetEnabled",
             "set_property": "#/$defs/SetProperty",
             "split": "#/$defs/Split",
@@ -965,6 +1276,21 @@
           },
           {
             "$ref": "#/$defs/CutRange"
+          },
+          {
+            "$ref": "#/$defs/SetCDL"
+          },
+          {
+            "$ref": "#/$defs/ApplyLut"
+          },
+          {
+            "$ref": "#/$defs/ColorGroup"
+          },
+          {
+            "$ref": "#/$defs/ColorVersion"
+          },
+          {
+            "$ref": "#/$defs/ApplyGrade"
           }
         ]
       },

@@ -35,7 +35,8 @@ from .resolve_client import (
 # move/trim/split/transition/ripple) the API cannot do faithfully — those route to the
 # OTIO-rebuild path (export timeline -> mutate OTIO -> ImportTimelineFromFile), implemented in
 # the interchange adapter (D11) and orchestrated by the CLI (D10). This is the dual apply-path.
-LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled"})
+LIVE_OPS = frozenset({"add_marker", "set_property", "delete", "set_enabled", "set_cdl", "apply_lut",
+                      "color_group", "color_version", "apply_grade"})
 
 # Live ops that ADD media or structure rather than mutate an existing clip: import_audio (media-pool
 # import + AppendToTimeline) and add_track. They apply live (no lossy rebuild) and, because they only
@@ -479,6 +480,8 @@ class ResolveAdapter(GrabAdapter):
             return self._create_bin(op, session)
         if op.op == "move_to_bin":
             return self._move_to_bin(op, ir, session)
+        if op.op == "apply_grade":
+            return self._apply_grade(op, ir, timeline)
 
         clip = ir.clip(op.clip_id)
         item = getattr(clip, "native", None)
@@ -523,7 +526,138 @@ class ResolveAdapter(GrabAdapter):
             # Delete is not cleanly reversible via the API; no inverse (validated up-front).
             return (f"delete {clip.name}", None, None)
 
+        if op.op == "set_cdl":
+            return self._apply_cdl(op, clip, item)
+
+        if op.op == "apply_lut":
+            return self._apply_lut_live(op, clip, item)
+
+        if op.op == "color_group":
+            return self._apply_color_group(op, clip, item, session)
+
+        if op.op == "color_version":
+            return self._apply_color_version(op, clip, item)
+
         raise ResolveOperationFailed(f"op '{op.op}' is not a live op")
+
+    @staticmethod
+    def _find_color_group(project, name):
+        groups = project.GetColorGroupsList() if hasattr(project, "GetColorGroupsList") else []
+        for g in groups or []:
+            if (g.GetName() if hasattr(g, "GetName") else "") == name:
+                return g
+        return None
+
+    def _apply_color_group(self, op, clip, item, session):
+        """Assign a clip to (or remove it from) a named color group via the Project + TimelineItem
+        color-group API. One group's shared nodes then drive every member clip."""
+        project = require(session.current_project() if session else None,
+                          "no current project (open one in Resolve)")
+        old = item.GetColorGroup() if hasattr(item, "GetColorGroup") else None
+        if op.action == "remove":
+            require(_native_call(item, "RemoveFromColorGroup"),
+                    f"RemoveFromColorGroup failed on '{clip.name}'")
+            inverse = (lambda: _native_call(item, "AssignToColorGroup", old)) if old else None
+            return (f"remove {clip.name} from its color group", inverse, None)
+        group = self._find_color_group(project, op.group) or require(
+            _native_call(project, "AddColorGroup", op.group), f"AddColorGroup '{op.group}' failed")
+        require(_native_call(item, "AssignToColorGroup", group),
+                f"AssignToColorGroup '{op.group}' failed on '{clip.name}'")
+        inverse = ((lambda: _native_call(item, "AssignToColorGroup", old)) if old is not None
+                   else (lambda: _native_call(item, "RemoveFromColorGroup")))
+        return (f"assign {clip.name} → color group '{op.group}'", inverse, None)
+
+    def _apply_grade(self, op, ir: TimelineIR, timeline: Any):
+        """Propagate a grade onto target clips: copy a hero clip's grade (``CopyGrades``) or apply a
+        saved PowerGrade ``.drx`` (``ApplyGradeFromDRX``). No inverse — a DRX/copy overwrites the
+        targets' grades and (CDL being write-only) the prior grade can't be read back to restore."""
+        def native_of(cid: str, role: str):
+            c = ir.clip(cid)
+            it = getattr(c, "native", None) if c is not None else None
+            if it is None:
+                raise ResolveOperationFailed(f"no native handle for {role} clip '{cid}'")
+            return c, it
+
+        targets = [native_of(t, "target")[1] for t in op.to_clips]
+        warn = ("grade overwrite is not reversible via the API (CDL is write-only) — the targets' "
+                "prior grades are replaced")
+        if op.drx_path:
+            require(_native_call(timeline, "ApplyGradeFromDRX", op.drx_path, int(op.grade_mode), targets),
+                    f"ApplyGradeFromDRX '{op.drx_path}' failed")
+            return (f"apply PowerGrade {os.path.basename(op.drx_path)} → {len(targets)} clip(s)",
+                    None, warn)
+        src, src_item = native_of(op.from_clip, "source")
+        require(_native_call(src_item, "CopyGrades", targets),
+                f"CopyGrades from '{src.name}' failed")
+        return (f"copy grade from {src.name} → {len(targets)} clip(s)", None, warn)
+
+    def _apply_color_version(self, op, clip, item):
+        """Add or load a named color version (Resolve's alternate-grade slots). versionType: 0=local,
+        1=remote."""
+        vtype = 0 if op.version_type == "local" else 1
+        if op.action == "load":
+            require(_native_call(item, "LoadVersionByName", op.name, vtype),
+                    f"LoadVersionByName '{op.name}' failed on '{clip.name}'")
+            return (f"load color version '{op.name}' on {clip.name}", None, None)
+        require(_native_call(item, "AddVersion", op.name, vtype),
+                f"AddVersion '{op.name}' failed on '{clip.name}'")
+        inverse = lambda: _native_call(item, "DeleteVersionByName", op.name, vtype)  # noqa: E731
+        return (f"add color version '{op.name}' on {clip.name}", inverse, None)
+
+    # -- live color ops (set_cdl, apply_lut) ------------------------------------
+    def _apply_cdl(self, op, clip, item):
+        """Apply an ASC CDL primary grade to a node via ``TimelineItem.SetCDL`` (the one color
+        primitive Resolve's API exposes directly).
+
+        ``SetCDL`` is **write-only** — Resolve has no ``GetCDL`` — so film-grip cannot read a
+        node's prior grade to restore it. The rollback inverse therefore resets the node to the
+        identity grade (neutral), which cleanly removes the grade film-grip just applied; if the
+        node carried a pre-existing grade, that is NOT recoverable via the API. We surface that
+        plainly rather than implying a perfect undo.
+        """
+        from ..color.cdl import CDL
+
+        cdl = CDL(slope=tuple(op.slope), offset=tuple(op.offset), power=tuple(op.power),
+                  saturation=op.saturation, color_space=op.color_space)
+        require(_native_call(item, "SetCDL", cdl.to_resolve(op.node_index)),
+                f"SetCDL failed on '{clip.name}' (node {op.node_index})")
+        identity = CDL.identity().to_resolve(op.node_index)
+        inverse = lambda: _native_call(item, "SetCDL", identity)  # noqa: E731
+        warn = ("Resolve's CDL API is write-only (no GetCDL): an undo resets the node to neutral, "
+                "not to any prior grade on it")
+        cs = f" @{op.color_space}" if op.color_space else ""
+        return (f"grade {clip.name} CDL sat {op.saturation:g} (node {op.node_index}){cs}", inverse, warn)
+
+    def _apply_lut_live(self, op, clip, item):
+        """Attach a LUT to a color node via ``SetLUT(nodeIndex, path)``.
+
+        The method lives on the **Graph** object in Resolve 19+ (``item.GetNodeGraph().SetLUT``) and
+        directly on the **TimelineItem** in older builds, so film-grip prefers the Graph and falls
+        back to the item. Unlike CDL, ``GetLUT`` IS readable, so the inverse restores the node's
+        prior LUT (empty string clears it) for a real undo.
+        """
+        node = op.node_index
+        target = item
+        getg = getattr(item, "GetNodeGraph", None)
+        if callable(getg):
+            try:
+                graph = getg()
+            except Exception:
+                graph = None
+            if graph is not None and callable(getattr(graph, "SetLUT", None)):
+                target = graph
+        old = None
+        getl = getattr(target, "GetLUT", None)
+        if callable(getl):
+            try:
+                old = getl(node)
+            except Exception:
+                old = None
+        require(_native_call(target, "SetLUT", node, op.path),
+                f"SetLUT failed on '{clip.name}' (node {node})")
+        restore = old if old is not None else ""
+        inverse = lambda: _native_call(target, "SetLUT", node, restore)  # noqa: E731
+        return (f"apply LUT {os.path.basename(op.path)} on {clip.name} (node {node})", inverse, None)
 
     def _rename(self, clip, item, value: str):
         """Rename a clip via its MediaPoolItem's 'Clip Name' (Resolve has no TimelineItem.SetName).

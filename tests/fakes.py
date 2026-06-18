@@ -40,6 +40,38 @@ class FakeMediaPoolItem:
         return {} if key is None else ""
 
 
+class FakeColorGroup:
+    """Resolve ColorGroup (``Project.AddColorGroup`` → assigned via ``TimelineItem``)."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self.calls: list[tuple] = []
+
+    def GetName(self) -> str:
+        return self._name
+
+
+class FakeColorGraph:
+    """Resolve 19+ Graph object (``TimelineItem.GetNodeGraph()``) — SetLUT/GetLUT live HERE on
+    newer builds, not on the TimelineItem. Mirrors the version split the adapter branches on."""
+
+    def __init__(self, num_nodes: int = 2):
+        self._luts: dict[int, str] = {}
+        self._num_nodes = num_nodes
+        self.calls: list[tuple] = []
+
+    def GetNumNodes(self) -> int:
+        return self._num_nodes
+
+    def SetLUT(self, node_index, path) -> bool:
+        self.calls.append(("SetLUT", node_index, path))
+        self._luts[int(node_index)] = path
+        return True
+
+    def GetLUT(self, node_index):
+        return self._luts.get(int(node_index), "")
+
+
 class FakeTimelineItem:
     """A clip on a timeline track. Frame values are timeline-relative ints, like Resolve."""
 
@@ -55,6 +87,7 @@ class FakeTimelineItem:
         properties: Optional[dict] = None,
         fail_set: bool = False,
         fail_marker: bool = False,
+        color_graph: bool = True,
     ):
         self._name = name
         self._start = int(start)
@@ -68,6 +101,14 @@ class FakeTimelineItem:
         self._fail_set = fail_set
         self._fail_marker = fail_marker
         self.calls: list[tuple] = []
+        # color: v19+ exposes SetLUT on a Graph object; older builds expose it on the item.
+        self._has_graph = color_graph
+        self._graph: Optional[FakeColorGraph] = None
+        self._cdl: Optional[dict] = None
+        self._item_luts: dict[int, str] = {}
+        self._color_group: Any = None
+        self._versions: list[tuple] = []
+        self._current_version: Optional[tuple] = None
 
     # -- reads ------------------------------------------------------------------
     def GetName(self) -> str:
@@ -143,6 +184,69 @@ class FakeTimelineItem:
         self._color = ""
         return True
 
+    # -- color: set_cdl / apply_lut ---------------------------------------------
+    def SetCDL(self, cdl_map) -> bool:
+        # Resolve's SetCDL is write-only (there is intentionally no GetCDL on the fake either).
+        self.calls.append(("SetCDL", dict(cdl_map)))
+        if self._fail_set:
+            return False
+        self._cdl = dict(cdl_map)
+        return True
+
+    def GetNodeGraph(self, layer_index: int = 0):
+        if not self._has_graph:
+            return None      # older build: no Graph object → adapter falls back to item.SetLUT
+        if self._graph is None:
+            self._graph = FakeColorGraph()
+        return self._graph
+
+    # older-build fallback path: SetLUT/GetLUT directly on the TimelineItem
+    def SetLUT(self, node_index, path) -> bool:
+        self.calls.append(("SetLUT", node_index, path))
+        if self._fail_set:
+            return False
+        self._item_luts[int(node_index)] = path
+        return True
+
+    def GetLUT(self, node_index):
+        return self._item_luts.get(int(node_index), "")
+
+    # color groups + versions (Resolve-live color organization)
+    def AssignToColorGroup(self, group) -> bool:
+        self.calls.append(("AssignToColorGroup", group.GetName() if hasattr(group, "GetName") else group))
+        self._color_group = group
+        return True
+
+    def GetColorGroup(self):
+        return self._color_group
+
+    def RemoveFromColorGroup(self) -> bool:
+        self.calls.append(("RemoveFromColorGroup",))
+        self._color_group = None
+        return True
+
+    def AddVersion(self, name, version_type) -> bool:
+        self.calls.append(("AddVersion", name, version_type))
+        self._versions.append((name, int(version_type)))
+        return True
+
+    def LoadVersionByName(self, name, version_type) -> bool:
+        self.calls.append(("LoadVersionByName", name, version_type))
+        self._current_version = (name, int(version_type))
+        return True
+
+    def DeleteVersionByName(self, name, version_type) -> bool:
+        self.calls.append(("DeleteVersionByName", name, version_type))
+        self._versions = [v for v in self._versions if v != (name, int(version_type))]
+        return True
+
+    def GetVersionNameList(self, version_type):
+        return [n for (n, t) in self._versions if t == int(version_type)]
+
+    def CopyGrades(self, targets) -> bool:
+        self.calls.append(("CopyGrades", [t.GetName() if hasattr(t, "GetName") else t for t in targets]))
+        return True
+
     # NOTE: real Resolve TimelineItem has NO SetName — renaming goes through the MediaPoolItem's
     # "Clip Name" property. The fake omits SetName deliberately so tests match the live API.
 
@@ -169,6 +273,11 @@ class FakeTimeline:
     # -- reads ------------------------------------------------------------------
     def GetName(self) -> str:
         return self._name
+
+    def ApplyGradeFromDRX(self, path, grade_mode, items) -> bool:
+        self.calls.append(("ApplyGradeFromDRX", path, grade_mode,
+                           [i.GetName() if hasattr(i, "GetName") else i for i in items]))
+        return True
 
     def GetStartFrame(self) -> int:
         return self._start
@@ -348,9 +457,25 @@ class FakeProject:
         self._name = name
         self._timeline = timeline
         self._media_pool = media_pool or FakeMediaPool()
+        self._color_groups: list[FakeColorGroup] = []
 
     def GetName(self) -> str:
         return self._name
+
+    # color groups (Resolve-live color organization)
+    def AddColorGroup(self, name: str) -> FakeColorGroup:
+        g = FakeColorGroup(name)
+        self._color_groups.append(g)
+        return g
+
+    def GetColorGroupsList(self) -> list:
+        return list(self._color_groups)
+
+    def DeleteColorGroup(self, group) -> bool:
+        if group in self._color_groups:
+            self._color_groups.remove(group)
+            return True
+        return False
 
     def GetCurrentTimeline(self) -> Optional[FakeTimeline]:
         return self._timeline

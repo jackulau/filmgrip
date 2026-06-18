@@ -135,6 +135,7 @@ _OP_DISPLAY_ORDER = (
     "trim", "move", "split", "cut_range", "insert", "ripple", "delete", "retime",
     "add_marker", "set_property", "set_enabled", "add_transition",
     "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
+    "set_cdl", "apply_lut", "color_group", "color_version", "apply_grade",
 )
 
 # Cosmetic suffixes only — the yes/no/rebuild/n-a classification itself is derived, never hand-set.
@@ -184,6 +185,14 @@ def write_capabilities_doc(path: str = "docs/CAPABILITIES.md") -> str:
             "**Audio**: live = import+place on an audio track via scripting; interchange/offline = via "
             "file round-trip; read-only = parsed, not written. **Per-clip volume/gain/fades are NOT "
             "scriptable in Resolve** (Fairlight-only) — film-grip places audio, levels stay manual.\n\n"
+            "**Color**: the scriptable grading surface is `set_cdl` (ASC CDL primary grade — the "
+            "portable pivot, rides through OTIO metadata + `.cc`/`.ccc`/`.cdl` sidecars + EDL + "
+            "FCPXML), `apply_lut` (a baked look), `color_group`/`color_version` (Resolve-live "
+            "organization), and `apply_grade` (copy a hero grade / apply a `.drx` PowerGrade). "
+            "Perception (`film-grip scopes`) synthesizes parade/waveform/vectorscope/white-balance "
+            "since Resolve exposes no scope API. **Primary wheels by value, curves, qualifiers, "
+            "Power Windows, Magic Mask and the AI color tools are GUI-only in every NLE — not "
+            "scriptable** — so film-grip surfaces them as advisory steps, never as applied edits.\n\n"
             + capability_markdown() + "\n\n"
             "## Which ops land where\n\n" + op_support_markdown() + "\n")
     with open(path, "w", encoding="utf-8") as fh:

@@ -54,6 +54,34 @@ def test_system_prompt_declares_fgx_columns_once(ctx):
     assert "set_property" in sp and "Never invent ids" in sp
 
 
+def test_system_prompt_teaches_color_ops_and_advisory(ctx):
+    sp = mh.build_system_prompt(ctx)
+    # every color op is advertised (ops list is derived from the schema, so this can't drift)
+    for op in ("set_cdl", "apply_lut", "color_group", "color_version", "apply_grade"):
+        assert op in sp, f"{op} not taught to the planner"
+    # the honest advisory: non-scriptable color tools are named and forbidden
+    assert "not scriptable" in sp.lower() or "NOT scriptable" in sp
+    assert "Magic Mask" in sp and "Power Windows" in sp
+    assert "get_scopes" in sp
+
+
+def test_ops_list_is_derived_from_schema(ctx):
+    sp = mh.build_system_prompt(ctx)
+    for op in ep.all_op_names():
+        assert op in sp
+
+
+def test_get_scopes_tool_is_registered():
+    assert "mcp__filmgrip__get_scopes" in mh._FG_TOOLS
+
+
+def test_payload_get_scopes_handles_offline_media(ctx):
+    # the cut.otio fixture references media that isn't on disk → honest per-clip errors, no fabrication
+    out = mh.payload_get_scopes(ctx)
+    assert "clips" in out and "errors" in out
+    assert out["clips"] == [] or all("clip_id" in c for c in out["clips"])
+
+
 def test_plan_edit_success_parses_and_validates(ctx):
     broll = ctx.selection.ids[0]
     plan_json = {"notes": "flag it", "ops": [

@@ -38,7 +38,7 @@ FORMAT_BY_EXT = {
 # Only add_transition stays out — transition fidelity is format-dependent and best done live.
 REBUILD_OPS = frozenset({
     "trim", "delete", "split", "add_marker", "set_property", "move", "insert", "ripple",
-    "retime", "set_enabled", "cut_range",
+    "retime", "set_enabled", "cut_range", "set_cdl", "apply_lut",
 })
 
 _MARKER_COLOR = {
@@ -362,6 +362,41 @@ class OtioMutator:
         clip, item = self._clip_and_item(op)
         item.enabled = bool(op.enabled)
         return f"{'enable' if op.enabled else 'disable'} {clip.name}"
+
+    def _set_cdl(self, op) -> str:
+        """Store an ASC CDL primary grade on the clip's OTIO metadata — the portable color channel.
+
+        CDL rides in ``metadata["filmgrip"]["cdl"]`` as plain SOP+sat numbers, so it survives the
+        OTIO round-trip and is the single source the CDL sidecar/FCPXML exporters read. (The live
+        Resolve adapter applies the same grade in-place via ``SetCDL``; here it persists in the file
+        the editor re-imports.)
+        """
+        clip, item = self._clip_and_item(op)
+        cdl = {
+            "slope": list(op.slope),
+            "offset": list(op.offset),
+            "power": list(op.power),
+            "saturation": float(op.saturation),
+            "node_index": int(op.node_index),
+        }
+        if op.color_space:
+            cdl["color_space"] = op.color_space
+        item.metadata.setdefault("filmgrip", {})["cdl"] = cdl
+        return (f"grade {clip.name} CDL sat {op.saturation:g}"
+                + (f" @{op.color_space}" if op.color_space else ""))
+
+    def _apply_lut(self, op) -> str:
+        """Record a LUT reference on the clip's OTIO metadata (the portable color channel).
+
+        Stored as a list under ``metadata["filmgrip"]["luts"]`` so several node LUTs can ride on
+        one clip. The live Resolve adapter attaches the LUT in-place via ``SetLUT``; here it
+        persists by reference. Honest limitation: a LUT is a file — bare references don't travel,
+        so the ``.cube`` must ship with the project or be baked.
+        """
+        clip, item = self._clip_and_item(op)
+        luts = item.metadata.setdefault("filmgrip", {}).setdefault("luts", [])
+        luts.append({"path": op.path, "node_index": int(op.node_index)})
+        return f"apply LUT {os.path.basename(op.path)} on {clip.name} (node {op.node_index})"
 
 
 class InterchangeAdapter(GrabAdapter):
