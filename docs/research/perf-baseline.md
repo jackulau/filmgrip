@@ -77,3 +77,28 @@ the full suite still green and a regression test pinning IR-build correctness on
 - Micro-optimize FGX projection — already sub-ms; would add complexity for no user-visible win.
 - Rewrite the IR in another language — measured and rejected previously (≤1.15% wall-clock); the
   costs above are Python-object churn, addressable in Python (slots, inlining).
+
+## Measured result (2026-06-21)
+
+Landed hypotheses 1 + 2 (`@dataclass(slots=True)` on `Clip`; inline basename in `media_ref_string`).
+Clean back-to-back A/B on an idle machine — `TimelineIR.from_otio`, 25-repeat median:
+
+| clips | before | after | delta |
+|------:|-------:|------:|------:|
+| 100  | 0.641 ms | 0.600 ms | ~6% |
+| 500  | 3.214 ms | 2.989 ms | ~7% |
+| 2000 | 17.098 ms | 16.603 ms | ~3% |
+
+Honest reading: the win is **small and shrinks with size** — a confirmation re-run measured
+0.604 / 3.176 / 16.812 ms, so the 500- and 2000-clip deltas sit near measurement noise. That is
+expected, not disappointing: the profile above puts the IR-build hot spot in the blake2b + base36 ID
+**mint** (hypothesis 3 territory), which slots does not touch. `Clip.__init__` is only ~0.050s of the
+total, so slotting it can only move that slice.
+
+What slots buys unconditionally is **lower memory per `Clip`** (no per-instance `__dict__`), real on
+the 1000–4000-clip projects this path targets, plus it is the idiomatic shape for a hot value object.
+Kept on those grounds; correctness-neutral (full suite green; `test_bench_guard` builds + validates
+a 2000-clip timeline, pinning large-timeline IR-build correctness). Hypotheses 3 (table-based
+`to_base36`) and 4 (diff-aware `reindex`) are the remaining real levers if IR-build ever becomes a
+user-visible cost — not pursued now: absolute time is already sub-20ms at 2000 clips, and
+honesty-tier discipline says do not add complexity chasing a number the user cannot feel.
