@@ -21,7 +21,7 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 4  # v2 added audio + organize ops; v3 added cut_range + per-op rationale; v4 adds color grading (set_cdl …)
+SCHEMA_VERSION = 5  # v2 added audio + organize ops; v3 added cut_range + per-op rationale; v4 color grading (set_cdl …); v5 adds speed_ramp (validated, intentionally apply-unsupported)
 
 # Working color spaces a grade may declare. CDL itself carries NO working space — the same numbers
 # look different in log vs display-referred footage — so film-grip lets a grade name its intended
@@ -269,6 +269,57 @@ class Retime(_Op):
         description="100=normal, 200=2x faster, 50=half speed, negative=reverse, 0=freeze-frame")
 
 
+class SpeedRamp(_Op):
+    """Variable-speed time-remap — ramp a clip's playback speed from ``start_speed`` to ``end_speed``
+    across a frame window, with an easing curve. The variable-speed sibling of ``retime`` (which is a
+    single constant speed).
+
+    ``start_speed``/``end_speed`` are fractions of normal speed (1.0 = normal, 2.0 = 2×, 0.5 = half;
+    both must be > 0 — a speed ramp is a continuous curve, so 0/freeze and reverse are out of scope,
+    use ``retime`` for those). The ramp interpolates speed over ``[start_frame, end_frame)`` (absolute
+    timeline frames inside the clip) following ``easing`` (``linear`` = even, ``smooth`` = S-curve
+    ease-in-out, ``ease_in``/``ease_out`` = one-sided).
+
+    HONESTY (load-bearing): a variable-speed ramp is a *speed curve*, not a constant multiplier. OTIO's
+    only retime schema is ``LinearTimeWarp`` — a single ``time_scalar`` — which cannot represent a
+    curve, and no interchange format film-grip writes (FCPXML / EDL / AAF / MLT / CapCut draft) carries
+    a portable speed curve that survives the round-trip. DaVinci Resolve's scripting API exposes no
+    retime-curve / speed-point method either. So this op is **validated but apply-UNSUPPORTED on every
+    adapter**: it is captured precisely as a decision (and surfaced to the planner as a manual step),
+    but every apply path REFUSES it via the capability-unsupported channel rather than silently faking
+    a constant speed — collapsing a ramp to a flat ``retime`` would be a lie. Want a single constant
+    speed change? Use ``retime``. Want the real ramp? It is a manual step in the editor (Resolve's
+    Retime Curve / Premiere Time Remapping), surfaced honestly, never fabricated.
+    """
+    op: Literal["speed_ramp"] = "speed_ramp"
+    clip_id: str
+    start_frame: int = Field(ge=0, description="absolute timeline frame the ramp starts at")
+    end_frame: int = Field(gt=0, description="absolute timeline frame the ramp ends before")
+    start_speed: float = Field(
+        default=1.0, gt=0.0, le=100.0,
+        description="speed at the ramp start as a fraction of normal (1=normal, 2=2x, 0.5=half; >0)")
+    end_speed: float = Field(
+        default=2.0, gt=0.0, le=100.0,
+        description="speed at the ramp end as a fraction of normal (>0; differs from start_speed)")
+    # A Literal (not a free str + validator) so the constraint rides into the JSON Schema as an
+    # `enum` — the checked-in editplan.schema.json then rejects a bad easing exactly like the typed
+    # model does, instead of accepting it and only failing at pydantic parse time.
+    easing: Literal["linear", "smooth", "ease_in", "ease_out"] = Field(
+        default="smooth",
+        description="transition shape: linear | smooth (ease in/out) | ease_in | ease_out")
+
+    @model_validator(mode="after")
+    def _ramp_is_forward(self) -> "SpeedRamp":
+        if self.end_frame <= self.start_frame:
+            raise ValueError(
+                f"speed_ramp needs start_frame < end_frame (got {self.start_frame}..{self.end_frame})")
+        if self.start_speed == self.end_speed:
+            raise ValueError(
+                f"speed_ramp start_speed and end_speed are equal ({self.start_speed}) — that is a "
+                f"constant speed, use 'retime' instead of a ramp")
+        return self
+
+
 class SetEnabled(_Op):
     """Enable or disable a clip without removing it (a disabled clip stays on the timeline but is
     skipped on playback/render). Lands live in Resolve (``SetClipEnabled``) and via the OTIO
@@ -453,8 +504,8 @@ class ApplyGrade(_Op):
 AnyOp = Annotated[
     Union[
         Trim, Move, Insert, Delete, SetProperty, AddMarker, AddTransition, Split, Ripple,
-        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SetEnabled, CutRange,
-        SetCDL, ApplyLut, ColorGroup, ColorVersion, ApplyGrade,
+        ImportAudio, AddTrack, RenameTrack, CreateBin, MoveToBin, Retime, SpeedRamp, SetEnabled,
+        CutRange, SetCDL, ApplyLut, ColorGroup, ColorVersion, ApplyGrade,
     ],
     Field(discriminator="op"),
 ]

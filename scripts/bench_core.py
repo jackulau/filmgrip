@@ -2,76 +2,77 @@
 """Benchmark film-grip's pure-compute core — to size a Rust spike on data, not faith.
 
 A "rewrite the core in Rust" idea is only worth it if the CPU paths it would speed up are a
-material fraction of a real edit's wall-clock. This measures those paths — IR indexing, FGX
-serialization, EditPlan validation — across timeline sizes, and compares their total against the
-I/O floor that actually dominates an edit: a single Claude planning turn (seconds of network).
+material fraction of a real edit's wall-clock. This is a THIN CLI over
+:func:`filmgrip.bench.hot_paths`: it times the three pure-CPU hot paths every agent turn pays — IR
+indexing, FGX serialization, EditPlan validation — across timeline sizes, and compares their total
+against the I/O floor that actually dominates an edit: a single Claude planning turn (seconds of
+network).
 
-Prints a table + a ceiling estimate and exits 0. Run: ``python scripts/bench_core.py [N ...]``.
+The timing + fixtures live in :mod:`filmgrip.bench` so the numbers here match what
+``scripts/bench.py`` prints and what ``tests/test_bench_guard.py`` guards — no parallel
+implementation to drift.
+
+Prints a table + a ceiling estimate and exits 0. Run: ``python scripts/bench_core.py [N ...]``
+(default sizes 500 / 2000 / 5000).
 """
 from __future__ import annotations
 
-import statistics
+import os
+import shutil
+import subprocess
 import sys
-import time
+import tempfile
 
-import opentimelineio as otio
-
-from filmgrip.core.ir import TimelineIR
-from filmgrip.protocol.editplan import EditPlan
-from filmgrip.protocol.validate import validate
-from filmgrip.serialize import fgx
+from filmgrip.bench import hot_paths, median_ms
 
 # A single Claude planning turn is seconds of network round-trip; this is the I/O floor a compiled
 # core can NEVER remove. Conservative (turns are often slower); the ceiling below only gets smaller
 # with a bigger floor.
 TYPICAL_LLM_TURN_MS = 4000.0
 
-
-def build_timeline(n_clips: int, tracks: int = 2) -> otio.schema.Timeline:
-    rate = 24.0
-
-    def rt(f: int) -> otio.opentime.RationalTime:
-        return otio.opentime.RationalTime(f, rate)
-
-    tl = otio.schema.Timeline(name=f"bench-{n_clips}")
-    tl.global_start_time = rt(0)
-    per = max(1, n_clips // tracks)
-    for t in range(tracks):
-        trk = otio.schema.Track(name=f"V{t + 1}", kind=otio.schema.TrackKind.Video)
-        for i in range(per):
-            trk.append(otio.schema.Clip(
-                name=f"c{t}_{i}",
-                media_reference=otio.schema.ExternalReference(target_url=f"/m/c{t}_{i}.mov"),
-                source_range=otio.opentime.TimeRange(rt(0), rt(48))))
-        tl.tracks.append(trk)
-    return tl
-
-
-def _median_ms(fn, iters: int = 5) -> float:
-    samples = []
-    for _ in range(iters):
-        t0 = time.perf_counter()
-        fn()
-        samples.append((time.perf_counter() - t0) * 1000.0)
-    return statistics.median(samples)
+# Tiles in the timed contact sheet — the D14 batching path turns this many seeks/decodes into ONE.
+SHEET_TILES = 8
 
 
 def bench(n: int) -> dict:
-    tl = build_timeline(n)
-    ir_ms = _median_ms(lambda: TimelineIR(tl))
-    ir = TimelineIR(tl)
-    reals = ir.real_clips()
-    sel = [c.id for c in reals[:10]]
-    fgx_ms = _median_ms(lambda: fgx.to_text(fgx.bundle(ir, sel, hops=1)))
-    plan = EditPlan.parse({"ops": [{"op": "add_marker", "clip_id": c.id, "frame": 0}
-                                   for c in reals[:50]]})
-    val_ms = _median_ms(lambda: validate(plan, ir))
-    return {"n": len(reals), "ir": ir_ms, "fgx": fgx_ms, "val": val_ms,
+    """Median ms for the three hot paths at ``n`` clips, plus their CPU total."""
+    hp = hot_paths(n)
+    ir_ms, fgx_ms, val_ms = hp["ir_build"], hp["fgx_bundle_to_text"], hp["validate"]
+    return {"n": n, "ir": ir_ms, "fgx": fgx_ms, "val": val_ms,
             "cpu": ir_ms + fgx_ms + val_ms}
 
 
+def frame_bench(tiles: int = SHEET_TILES) -> None:
+    """Time the D14 batched contact-sheet extraction (one ffmpeg decode → N tiles) and print it.
+
+    ffmpeg-gated: if ffmpeg/ffprobe are absent (e.g. CI), print a skip note and return — the script
+    still exits 0. The clip is a tiny in-memory lavfi pattern, so no real media is needed; the median
+    here is the before/after knob for the per-tile→single-decode change (run on main vs this branch).
+    """
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        print("\nFrame-extraction bench: SKIPPED (ffmpeg/ffprobe not installed).")
+        return
+    # Import lazily so the pure-CPU bench above never imports the perception/ffmpeg stack.
+    from filmgrip.perception.frames import compose_sheet
+
+    with tempfile.TemporaryDirectory(prefix="filmgrip-bench-") as tmp:
+        src = os.path.join(tmp, "src.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "lavfi", "-i", "testsrc=duration=4:size=128x72:rate=24",
+             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", src],
+            check=True, capture_output=True)
+        # Evenly-sampled timestamps across the clip — the same shape clip_sheet asks for.
+        times = [round((i + 0.5) * 4.0 / tiles, 3) for i in range(tiles)]
+        out = os.path.join(tmp, "sheet.png")
+        ms = median_ms(lambda: compose_sheet(src, times, out, waveform=False),
+                       repeats=5, warmup=1)
+    print(f"\nFrame extraction (contact sheet, {tiles} tiles, single ffmpeg decode):")
+    print(f"  median {ms:.1f} ms  ({ms / tiles:.1f} ms/tile)")
+
+
 def main(argv=None) -> int:
-    sizes = [int(a) for a in (argv or sys.argv[1:])] or [500, 2000, 5000]
+    sizes = [int(a) for a in (argv if argv is not None else sys.argv[1:])] or [500, 2000, 5000]
     print("film-grip core benchmark — CPU paths a Rust core could speed up")
     print(f"(I/O floor: one Claude planning turn ≈ {TYPICAL_LLM_TURN_MS:.0f} ms of network)\n")
     print(f"{'clips':>7} | {'IR index':>10} | {'FGX ser':>10} | {'validate':>10} | {'CPU total':>10}")
@@ -90,6 +91,8 @@ def main(argv=None) -> int:
     print(f"  An edit's wall-clock ≈ CPU + one LLM turn ≈ {worst['cpu'] + TYPICAL_LLM_TURN_MS:.0f} ms")
     print(f"  A perfect (zero-cost) Rust core could remove AT MOST {ceiling:.2f}% of that wall-clock.")
     print("\nSee docs/RUST_SPIKE.md for the verdict.")
+
+    frame_bench()
     return 0
 
 

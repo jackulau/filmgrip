@@ -104,6 +104,44 @@ This is the non-destructive equivalent of the render→re-watch self-eval loop p
 use: same evidence (geometry + boundary imagery), but no generation-loss bake and your project
 file stays the source of truth. The in-Resolve panel runs the structural check on every apply.
 
+## Layer 5 — content readers: color, motion, sound, rhythm
+
+Beyond speech, film-grip reads the **signal** of a clip — its color, motion, loudness, and musical
+pulse — as deterministic numbers a planner can reason over and verify against. Each reader is a pure
+function (numpy/stdlib, unit-tested on a known-answer synthetic signal) behind a thin IO entry that
+applies the same honesty wall: a **retimed** clip, **offline** media, or a **missing dependency** each
+returns an `errors` entry (or raises `PerceptionUnavailable` with the install fix) — never a
+fabricated value.
+
+**Color scopes** (`film-grip scopes`, `get_scopes`) — `perception/scopes.py`. Luma/exposure, clip &
+crush percentages, vectorscope hue, and a skin-tone delta measured on a flesh axis (~123°). It decodes
+known **log/ACES** encodings to display before judging exposure (`color_space=` param, rec709 default),
+so a flat log clip isn't misread as underexposed. `analyze_clip_scopes` samples N frames across the
+clip and reports **median + spread** (robust to one flashy frame), with the skin-tone delta computed
+over **skin-masked pixels only**, not the frame average. numpy required.
+
+**Music / beat** (`film-grip beats`, `get_beats`) — `perception/music.py`. Spectral-flux onset
+envelope → autocorrelation tempo → beat grid, mapped to timeline frames for music-synced cuts. Pure
+numpy is the advisory baseline; optional `librosa` (`[music]`) is a better engine when installed.
+Downbeats are reported only when a detector finds them — never invented. Drives the deterministic
+`beat-cut` pack (snaps cuts to the beat grid; `PackError` if audio/ffmpeg/numpy is missing).
+
+**Acoustic** (`analyze_acoustic`) — `perception/acoustic.py`. dBFS quiet-span detection (catches
+silence on music/ambience that ASR can't see) and J/L-cut detection (audio leads or lags the picture
+cut). numpy.
+
+**Motion / scene** (`analyze_motion`) — `perception/motion.py`. Mean-abs frame-difference motion
+series, scene-boundary cuts, and a shake/stability score. numpy + ffmpeg; refuses retimed clips;
+under-detects slow dissolves (advisory).
+
+**Pacing / rhythm** (`pacing_metrics`) — `perception/pacing.py`. Average shot length, cut cadence,
+shot-length distribution, and a fast/medium/slow rhythm verdict — **timeline-only, zero media
+decode**, so it always runs.
+
+Under all of these sits `audio_io.decode_pcm` / `rms_envelope` — the shared float-PCM substrate music
+and acoustic build on. Run `film-grip status` (the doctor) to see which tiers are live on your machine,
+each with its exact fix.
+
 ## Rationale-bearing edits (v3 protocol)
 
 Every op accepts optional `reason` and `quote` fields — *why* this edit exists and the spoken
@@ -119,6 +157,8 @@ like a reviewed change, not an opaque mutation.
 | `get_transcript(ids)` | packed phrases in timeline frames | ~1/10 of word-JSON |
 | `analyze_speech(ids)` | silences + fillers + `cut_range` candidates | small, deterministic |
 | `view_frames(ids \| frames)` | contact-sheet PNG path + legend | one image read |
+| `get_scopes(ids)` | color: exposure, cast, skin-tone, clip/crush (median + spread) | small, deterministic |
+| `get_beats(ids)` | tempo + beat grid in timeline frames | small, deterministic |
 
 Perception is never auto-bundled into the grab context — the planner pulls exactly what the
 instruction needs.

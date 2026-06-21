@@ -8,11 +8,26 @@ interchange is lossy).
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
+
+
+def safe_out_path(source: str, out_path: Optional[str] = None, suffix: str = ".edited") -> str:
+    """Resolve where an offline adapter should write — never the source by default.
+
+    An explicit ``out_path`` always wins (returned unchanged). With ``None`` we return a sibling
+    ``<stem><suffix><ext>`` (``/tmp/proj.mlt`` -> ``/tmp/proj.edited.mlt``) so a write-back never
+    silently overwrites the user's project. Mirrors ``cli_edit._derived_out`` so the adapter default
+    matches what the CLI already derives.
+    """
+    if out_path is not None:
+        return out_path
+    stem, ext = os.path.splitext(source)
+    return f"{stem}{suffix}{ext}"
 
 
 class NotSupportedError(RuntimeError):

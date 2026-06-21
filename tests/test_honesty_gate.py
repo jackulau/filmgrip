@@ -44,14 +44,18 @@ def test_checked_in_capabilities_doc_is_current(tmp_path):
 
 def test_all_editplan_ops_are_reachable_in_validate_or_warned():
     # Every op type the schema accepts must be handled somewhere (live, rebuild, or honestly rejected)
-    # — i.e. it appears in the Resolve live sets, the interchange REBUILD_OPS, or is the documented
-    # reject-only op (add_transition). Op list comes from the schema itself (no hand-coded list).
+    # — i.e. it appears in the Resolve live sets, the interchange REBUILD_OPS, or is a documented
+    # reject-only op. add_transition (no scriptable/interchange transition) and speed_ramp (no
+    # portable variable-speed curve — see SpeedRamp docstring) are validated decisions that every
+    # apply path refuses via the capability-unsupported channel rather than fake. Op list comes from
+    # the schema itself (no hand-coded list).
     from filmgrip.adapters.interchange import REBUILD_OPS
     from filmgrip.adapters.resolve_adapter import LIVE_EXTRA_OPS, LIVE_OPS
 
     op_literals = set(ep.all_op_names())
     assert op_literals, "schema must declare ops"
-    handled = LIVE_OPS | LIVE_EXTRA_OPS | REBUILD_OPS | {"add_transition"}
+    reject_only = {"add_transition", "speed_ramp"}  # valid but apply-unsupported on every adapter
+    handled = LIVE_OPS | LIVE_EXTRA_OPS | REBUILD_OPS | reject_only
     assert op_literals <= handled, f"unhandled ops: {op_literals - handled}"
 
 

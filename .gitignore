@@ -29,6 +29,9 @@ node_modules/
 scratch/
 *.otio.tmp
 
+# regenerated test media (rebuild locally via tests/fixtures/make_fixtures.py; never committed)
+tests/fixtures/media/
+
 # Claude Code local state
 .claude/
 

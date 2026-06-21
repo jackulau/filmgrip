@@ -140,8 +140,8 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
             continue
         # ops that target an existing clip
         if name in ("trim", "move", "delete", "set_property", "add_marker", "add_transition",
-                    "split", "move_to_bin", "retime", "set_enabled", "cut_range", "set_cdl",
-                    "apply_lut", "color_group", "color_version"):
+                    "split", "move_to_bin", "retime", "speed_ramp", "set_enabled", "cut_range",
+                    "set_cdl", "apply_lut", "color_group", "color_version"):
             clip = ir.clip(op.clip_id)
             if clip is None:
                 err(UNKNOWN_CLIP, i, name, f"no clip with id '{op.clip_id}' in current timeline", op.clip_id)
@@ -231,6 +231,16 @@ def validate(plan: EditPlan, ir: TimelineIR) -> ValidationResult:
                         f"rippling cut_range ops on track {code} must be ordered last-to-first "
                         f"(this start {op.start_frame} ≥ previous {prev})", op.clip_id)
                 last_ripple_cut_start[code] = op.start_frame
+
+        elif name == "speed_ramp":
+            # The ramp window must fall inside the clip (same range check cut_range uses). speed_ramp
+            # is apply-UNSUPPORTED on every adapter (no portable speed-curve mechanism exists), so it
+            # is rejected at apply via the capability-unsupported channel — but the plan is still held
+            # to a real, in-range curve here so a hallucinated window can't pose as a valid decision.
+            if not (clip.start <= op.start_frame < op.end_frame <= clip.end):
+                err(OUT_OF_BOUNDS, i, name,
+                    f"speed ramp {op.start_frame}..{op.end_frame} not inside clip "
+                    f"{clip.start}..{clip.end}", op.clip_id)
 
         elif name == "apply_lut":
             # A hallucinated/malformed LUT path must not survive validation. An on-disk file is
@@ -394,6 +404,10 @@ def _describe(op, ir: TimelineIR) -> str:
         how = ("freeze-frame" if pct == 0
                else f"{pct:g}% speed" + (" (reverse)" if pct < 0 else ""))
         return f"retime {nm(op.clip_id)} → {how}"
+    if op.op == "speed_ramp":
+        return (f"speed_ramp {nm(op.clip_id)} [{op.start_frame}..{op.end_frame}) "
+                f"{op.start_speed:g}×→{op.end_speed:g}× ({op.easing}) — manual: no portable "
+                f"speed-curve, do it in the editor")
     if op.op == "set_enabled":
         return f"{'enable' if op.enabled else 'disable'} {nm(op.clip_id)}"
     if op.op == "set_cdl":

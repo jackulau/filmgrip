@@ -132,14 +132,15 @@ def features_markdown() -> str:
 # the schema (filmgrip.protocol.editplan.all_op_names) by the honesty gate, so no op can be silently
 # dropped or mislabelled.
 _OP_DISPLAY_ORDER = (
-    "trim", "move", "split", "cut_range", "insert", "ripple", "delete", "retime",
+    "trim", "move", "split", "cut_range", "insert", "ripple", "delete", "retime", "speed_ramp",
     "add_marker", "set_property", "set_enabled", "add_transition",
     "import_audio", "add_track", "rename_track", "create_bin", "move_to_bin",
     "set_cdl", "apply_lut", "color_group", "color_version", "apply_grade",
 )
 
 # Cosmetic suffixes only — the yes/no/rebuild/n-a classification itself is derived, never hand-set.
-_INTER_NOTE = {"set_property": " (metadata)", "add_transition": " (do in editor)"}
+_INTER_NOTE = {"set_property": " (metadata)", "add_transition": " (do in editor)",
+               "speed_ramp": " (do in editor)"}
 
 
 def op_support_row(op: str) -> tuple[str, str, str]:
