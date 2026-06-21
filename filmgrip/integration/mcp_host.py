@@ -168,6 +168,42 @@ def payload_get_scopes(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
     return {"clips": clips, "errors": errors}
 
 
+def payload_get_beats(ctx: PlannerContext, ids: Optional[list[str]] = None) -> dict:
+    """Musical beat grid + tempo per clip — the rhythm perception an agent reads to PROPOSE music-synced
+    edits ("cut on the beat", "land each clip on the drop") and re-reads to VERIFY them. Pull-on-demand:
+    paid only when the instruction is about rhythm/music.
+
+    Uses :func:`~filmgrip.perception.music.beats_for_media`: each clip's audio is decoded over its source
+    window and reduced to a tempo (BPM) + a beat grid in **timeline frames** (plus onsets), via the
+    pure-numpy advisory engine (or the librosa upgrade when installed). Each clip entry keeps ``clip_id``.
+    Per-clip failures — retimed clip (refused), offline/unresolvable media, decode failure — come back in
+    ``errors`` (never a fabricated grid); missing ffmpeg/numpy surfaces as a per-clip error too. Mirrors
+    :func:`payload_get_scopes`' ``{clips, errors}`` shape exactly: only real reads join ``clips``."""
+    from ..perception.align import media_path_of
+    from ..perception.music import beats_for_media
+    from ..perception.transcribe import PerceptionUnavailable
+
+    target = ids if ids else list(ctx.selection.ids)
+    clips, errors = [], []
+    for cid in target:
+        c = ctx.ir.clip(cid)
+        if c is None or c.kind != "clip":
+            continue
+        try:
+            rep = beats_for_media(media_path_of(c), c)
+        except PerceptionUnavailable as exc:           # missing dep — applies to every clip
+            errors.append(f"{c.name}: {exc}")
+            continue
+        # Honest passthrough: per-clip errors (retimed/offline) surface; only real reads join clips.
+        rep_errors = rep.get("errors", [])
+        for e in rep_errors:
+            errors.append(f"{c.name}: {e}")
+        if not rep_errors:
+            rep["clip_id"] = cid
+            clips.append(rep)
+    return {"clips": clips, "errors": errors}
+
+
 def build_system_prompt(ctx: PlannerContext) -> str:
     """Compact planner prompt. Declares the FGX column legend ONCE so rows stay key-free."""
     cols = ",".join(fgx.COLS)
@@ -222,7 +258,10 @@ def build_system_prompt(ctx: PlannerContext) -> str:
         "order rippling cut_ranges on a track LAST-TO-FIRST. ASR timestamps drift 50-100ms: "
         "place cuts in the silent gaps between phrases, never inside a word, and pad word edges "
         "by 1-5 frames. To LOOK at footage (framing, content, cut boundaries), call "
-        "view_frames(ids or frames) and read the returned PNG. If these tools return errors "
+        "view_frames(ids or frames) and read the returned PNG. When the edit is about RHYTHM or "
+        "MUSIC ('cut on the beat', 'land each clip on the drop', 'sync to the beat'), call "
+        "get_beats(ids): tempo (BPM) + a beat grid in timeline frames (plus onsets) — perceive the "
+        "grid, place cuts on it, then re-read to verify. If these tools return errors "
         "(no ASR backend, offline media, no ffmpeg), say so — do not guess content.\n"
         "Rationale: optionally set reason (why this edit) and quote (the spoken words it anchors "
         "to) on each op — they show up in the diff and are stored on the clip, making the edit "
@@ -366,15 +405,22 @@ def build_mcp_server(ctx: PlannerContext):
     async def get_scopes(args):  # pragma: no cover
         return _text(payload_get_scopes(ctx, args.get("ids")))
 
+    @tool("get_beats", "Musical beat grid + tempo for clips (tempo BPM, beat frames in timeline time, "
+          "onsets) — read these to propose music-synced cuts ('cut on the beat') and to verify one "
+          "landed.",
+          {"ids": list}, read_only)
+    async def get_beats(args):  # pragma: no cover
+        return _text(payload_get_beats(ctx, args.get("ids")))
+
     return create_sdk_mcp_server("filmgrip", "0.1.0",
                                  [get_selection, get_context, query_clips, get_transcript,
-                                  analyze_speech, view_frames, get_scopes])
+                                  analyze_speech, view_frames, get_scopes, get_beats])
 
 
 _FG_TOOLS = ["mcp__filmgrip__get_selection", "mcp__filmgrip__get_context",
              "mcp__filmgrip__query_clips", "mcp__filmgrip__get_transcript",
              "mcp__filmgrip__analyze_speech", "mcp__filmgrip__view_frames",
-             "mcp__filmgrip__get_scopes"]
+             "mcp__filmgrip__get_scopes", "mcp__filmgrip__get_beats"]
 
 
 class ClaudeAgentTransport(Transport):

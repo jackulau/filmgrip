@@ -92,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
     sc.add_argument("--png", help="also render a visual scope image (waveform+vectorscope+histogram)")
 
+    bt = sub.add_parser("beats", help="synthesize a musical beat grid + tempo (BPM) as JSON for a "
+                                      "media file or a timeline's clips (timeline-frame beats)")
+    bt.add_argument("--media", help="analyze one media file directly")
+    bt.add_argument("--fixture", help="analyze clips of a timeline file instead (per-clip JSON)")
+    bt.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
+
     sub.add_parser("quickstart", help="run a 30-second, fully offline demo (no editor, no API key) "
                                       "on a bundled fixture, then suggest next commands")
 
@@ -146,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_scopes import cmd_scopes
 
         return cmd_scopes(args)
+    if args.command == "beats":
+        from .cli_beats import cmd_beats
+
+        return cmd_beats(args)
     if args.command == "quickstart":
         from .cli_quickstart import cmd_quickstart
 
