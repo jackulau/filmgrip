@@ -131,13 +131,21 @@ def payload_view_frames(ctx: PlannerContext, ids: Optional[list[str]] = None,
     }
 
 
-def payload_get_scopes(ctx: PlannerContext, ids: Optional[list[str]] = None) -> dict:
+def payload_get_scopes(ctx: PlannerContext, ids: Optional[list[str]] = None, *,
+                       samples: int = 5) -> dict:
     """Color scopes per clip (parade/waveform/vectorscope/white-balance/exposure) — the perception
     an agent reads to PROPOSE a grade and re-reads to VERIFY it. Pull-on-demand: paid only when the
-    instruction is about color. Per-clip failures (no ffmpeg/numpy, offline media) come back in
-    ``errors`` — never a fabricated reading."""
+    instruction is about color.
+
+    Uses :func:`~filmgrip.perception.scopes.analyze_clip_scopes`: each clip is sampled over ``samples``
+    frames spanning its source window and the scope stats are returned as a temporally-robust
+    **median + spread** (so one flashy frame can't skew the read the planner grades against), together
+    with a per-pixel **skin-over-skin-pixels** segmentation (``None`` when a clip shows no skin). Each
+    clip entry keeps ``clip_id``; the legacy keys (``luma``/``vectorscope``/``white_balance``/
+    ``exposure``/``parade``) move under ``aggregate``. Per-clip failures — retimed clip (refused),
+    offline media (curated), no ffmpeg/numpy — come back in ``errors`` (never a fabricated reading)."""
     from ..perception.align import media_path_of
-    from ..perception.scopes import analyze_frame
+    from ..perception.scopes import analyze_clip_scopes
     from ..perception.transcribe import PerceptionUnavailable
 
     target = ids if ids else list(ctx.selection.ids)
@@ -147,12 +155,16 @@ def payload_get_scopes(ctx: PlannerContext, ids: Optional[list[str]] = None) -> 
         if c is None or c.kind != "clip":
             continue
         try:
-            at_s = c.source_start / ctx.ir.rate if ctx.ir.rate else 0.0
-            rep = analyze_frame(media_path_of(c), at_s)
+            rep = analyze_clip_scopes(media_path_of(c), c, samples=samples)
+        except PerceptionUnavailable as exc:           # missing dep — applies to every clip
+            errors.append(f"{c.name}: {exc}")
+            continue
+        # Honest passthrough: per-clip errors (retimed/offline) surface; only real reads join clips.
+        for e in rep.get("errors", []):
+            errors.append(f"{c.name}: {e}")
+        if rep.get("n_analyzed", 0) > 0:
             rep["clip_id"] = cid
             clips.append(rep)
-        except PerceptionUnavailable as exc:
-            errors.append(f"{c.name}: {exc}")
     return {"clips": clips, "errors": errors}
 
 
