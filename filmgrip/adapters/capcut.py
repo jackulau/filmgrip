@@ -22,7 +22,7 @@ from typing import Any, Optional
 from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
-from .base import ApplyResult, Capabilities, GrabAdapter, NotSupportedError, Selection
+from .base import ApplyResult, Capabilities, GrabAdapter, NotSupportedError, Selection, safe_out_path
 
 SUPPORTED_OPS = frozenset({"trim", "delete", "move"})
 
@@ -181,7 +181,9 @@ class CapcutAdapter(GrabAdapter):
             # Nothing the user asked for is representable — don't rewrite the draft and imply work.
             return ApplyResult(ok=False, unsupported=unsupported,
                                diff="  (no CapCut-applicable ops)")
-        out = self._resolve_path(out_path) if out_path else self._resolve_path(source)
+        # Resolve the explicit out_path as before; with none, default to a sibling of the resolved
+        # source file (draft_content.json -> draft_content.edited.json) instead of overwriting it.
+        out = self._resolve_path(out_path) if out_path else safe_out_path(self._resolve_path(source))
         with open(out, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
         diff = "\n".join(f"  ✓ {d}" for d in applied)

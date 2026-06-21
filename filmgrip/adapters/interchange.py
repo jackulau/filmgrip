@@ -21,7 +21,7 @@ from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
 from ..serialize.fgx import parse_track_code
-from .base import ApplyResult, Capabilities, GrabAdapter, Selection
+from .base import ApplyResult, Capabilities, GrabAdapter, Selection, safe_out_path
 
 # extension -> OTIO adapter name
 FORMAT_BY_EXT = {
@@ -453,7 +453,7 @@ class InterchangeAdapter(GrabAdapter):
 
         applied, unsupported = OtioMutator(ir).apply(plan)
 
-        out = out_path or source
+        out = safe_out_path(source, out_path)  # default to a sibling, never overwrite the source
         fmt = self._fmt_for(out, out_format)
         warnings = self._lossy_warnings(ir, fmt)
         if not applied:

@@ -20,7 +20,7 @@ from lxml import etree
 from ..core.ir import TimelineIR
 from ..protocol.editplan import EditPlan
 from ..protocol.validate import validate
-from .base import ApplyResult, Capabilities, GrabAdapter, Selection
+from .base import ApplyResult, Capabilities, GrabAdapter, Selection, safe_out_path
 
 SUPPORTED_OPS = frozenset({"move", "trim", "delete"})
 
@@ -188,7 +188,7 @@ class MltAdapter(GrabAdapter):
             # Nothing the user asked for is representable — don't rewrite the project and imply work.
             return ApplyResult(ok=False, unsupported=unsupported,
                                diff="  (no MLT-applicable ops)")
-        out = out_path or source
+        out = safe_out_path(source, out_path)  # default to a sibling, never overwrite the source
         tree.write(out, xml_declaration=True, encoding="utf-8", pretty_print=True)
         diff = "\n".join(f"  ✓ {d}" for d in applied)
         diff += f"\n  → wrote MLT to {out}"
