@@ -92,6 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--select", help="comma-separated clip IDs in fixture mode (default: all clips)")
     sc.add_argument("--png", help="also render a visual scope image (waveform+vectorscope+histogram)")
 
+    sub.add_parser("quickstart", help="run a 30-second, fully offline demo (no editor, no API key) "
+                                      "on a bundled fixture, then suggest next commands")
+
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
     st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor and whether "
@@ -143,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cli_scopes import cmd_scopes
 
         return cmd_scopes(args)
+    if args.command == "quickstart":
+        from .cli_quickstart import cmd_quickstart
+
+        return cmd_quickstart(args)
     if args.command == "editors":
         from .adapters.registry import capability_markdown, features_markdown, op_support_markdown
 
