@@ -62,11 +62,111 @@ def _seconds(value) -> float:
     return float(text[:-1] if text.endswith("s") else text)
 
 
+def _beat_cut(ir, ids, params) -> list:
+    """Beat-synced cut pack — snaps each clip to the musical grid, zero LLM calls.
+
+    For every selected audio-bearing clip it reads the beat grid
+    (:func:`filmgrip.perception.music.beats_for_media`, beats already projected to TIMELINE
+    frames), then trims the off-beat lead-in and tail so the retained content begins and ends on a
+    beat: a head ``cut_range`` ``[clip.start, first_in_beat)`` and a tail ``cut_range``
+    ``[last_in_beat, clip.end)`` per clip. Only ``cut_range`` (a REBUILD_OP) is emitted, and the
+    whole plan is ordered strictly descending per track so a later op's frames are never
+    invalidated by an earlier op's ripple (the single-snapshot-vs-ripple rule, mirrored from
+    ``speech.analyze_clips``).
+
+    Honest failure (same wall as ``silence-cut`` / the perception layer): if ffmpeg or numpy is
+    missing the underlying reader raises :class:`PerceptionUnavailable`; offline media and retimed
+    clips come back as ``errors`` entries. Either way this raises :class:`PackError` with the real
+    reason — it never silently emits fewer cuts or an empty plan that poses as success.
+    """
+    from ..perception.align import media_path_of
+    from ..perception.music import beats_for_media
+    from ..perception.transcribe import PerceptionUnavailable
+    from . import PackError
+
+    use_librosa = _tristate(params.get("use_librosa", "auto"))
+    unit = str(params.get("unit", "beat")).strip().lower()  # "beat" | "downbeat"
+
+    ops: list[dict] = []
+    errors: list[str] = []
+    for clip in selected_clips(ir, ids):
+        path = media_path_of(clip)
+        if path is None:
+            errors.append(f"{clip.id}: source media path unknown — cannot read beats")
+            continue
+        try:
+            payload = beats_for_media(path, clip, use_librosa=use_librosa)
+        except PerceptionUnavailable as exc:
+            # ffmpeg/numpy/forced-librosa missing — a deps problem, not a per-clip one: fail loudly
+            # and immediately rather than turning a missing engine into an empty plan.
+            raise PackError(f"beat-cut cannot read beats:\n{exc}") from exc
+        if payload["errors"]:
+            errors.extend(payload["errors"])
+            continue
+        ops.extend(_beat_cut_ops(clip, payload, unit))
+
+    if errors:
+        raise PackError("beat-cut could not analyze every selected clip:\n  "
+                        + "\n  ".join(errors))
+    return _descending_per_track(ops, ir)
+
+
+def _beat_cut_ops(clip, payload, unit: str) -> list[dict]:
+    """Head/tail ``cut_range`` ops that snap one clip's boundaries onto its beat grid.
+
+    Beats arrive as TIMELINE frames. We keep the beats strictly inside the clip span and remove the
+    off-beat fragment before the first one and after the last one, so the surviving content lands on
+    beats. ``downbeats`` are used when ``unit='downbeat'`` and the reader actually detected them
+    (it never fabricates them); otherwise we fall back to beats.
+    """
+    grid = payload.get("downbeats") if unit == "downbeat" else None
+    if not grid:                                   # no (down)beats detected → use the beat grid
+        grid = payload.get("beats") or []
+    inside = sorted(f for f in grid if clip.start < f < clip.end)
+    if not inside:                                 # nothing on-grid inside the clip → no honest cut
+        return []
+    ops: list[dict] = []
+    first, last = inside[0], inside[-1]
+    if first > clip.start:                         # drop the off-beat lead-in
+        ops.append({"op": "cut_range", "clip_id": clip.id,
+                    "start_frame": clip.start, "end_frame": first, "ripple": True})
+    if last < clip.end:                            # drop the off-beat tail
+        ops.append({"op": "cut_range", "clip_id": clip.id,
+                    "start_frame": last, "end_frame": clip.end, "ripple": True})
+    return ops
+
+
+def _descending_per_track(ops: list[dict], ir) -> list[dict]:
+    """Order ``cut_range`` ops strictly last-to-first per track (the rippling-cut contract).
+
+    Sorting by ``start_frame`` descending across all ops keeps each track descending too, since the
+    validator's order check is per-track; clip id is a stable tiebreaker for determinism.
+    """
+    return sorted(ops, key=lambda o: (o["start_frame"], o["clip_id"]), reverse=True)
+
+
+def _tristate(value):
+    """'auto'/None → None (use librosa if importable); 'true'/'false' → bool (force the engine)."""
+    text = str(value).strip().lower()
+    if text in ("auto", "none", ""):
+        return None
+    return text not in ("false", "0", "no")
+
+
 register(Pack("silence-cut", "Remove silences (and umm/uh fillers) from the selected clips, "
                              "driven by word-level transcripts — deterministic, no LLM call.",
               compile=_silence_cut, params={"min_silence": "0.4s", "fillers": "true"},
               requires=("an ASR backend (pip install 'film-grip[transcribe]', whisper.cpp, or "
                         "ELEVENLABS_API_KEY)", "source media files on disk")))
+
+
+register(Pack("beat-cut", "Snap the selected clips' boundaries onto the musical beat grid — "
+                          "trims the off-beat lead-in/tail so cuts land on the beat. Deterministic, "
+                          "transcript-free, no LLM call.",
+              compile=_beat_cut, params={"unit": "beat", "use_librosa": "auto"},
+              requires=("ffmpeg + numpy for audio analysis (the pure-numpy beat grid ships in the "
+                        "base install; 'pip install film-grip[music]' adds the higher-accuracy "
+                        "librosa engine)", "source media files on disk")))
 
 
 # --- prompt packs (D7): a saved instruction handed to the active planner backend ---------------
