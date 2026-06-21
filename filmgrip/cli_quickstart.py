@@ -144,13 +144,16 @@ def _timeline_overview(ir) -> list[str]:
 
 def _next_steps() -> list[str]:
     """2–3 concrete next commands. Each one genuinely works with no editor / no key."""
+    # Build the demo command outside the f-strings: its inner double-quoted instruction must not sit
+    # inside an f-string expression, which is a SyntaxError on Python 3.11 (pre-PEP-701).
+    demo = _c('film-grip edit --fixture <your.otio> --dry-run "tighten the open"', 'bold')
     return [
         (f"  {_c('•', 'cyan')} see exactly what film-grip can apply per editor:\n"
          f"      {_c('film-grip editors', 'bold')}"),
         (f"  {_c('•', 'cyan')} check whether your editor + toolchain are wired up (the doctor):\n"
          f"      {_c('film-grip status', 'bold')}"),
         (f"  {_c('•', 'cyan')} run this offline demo on YOUR OWN timeline (no editor needed):\n"
-         f"      {_c('film-grip edit --fixture <your.otio> --dry-run \"tighten the open\"', 'bold')}"),
+         f"      {demo}"),
     ]
 
 
