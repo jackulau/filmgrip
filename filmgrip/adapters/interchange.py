@@ -79,8 +79,19 @@ class OtioMutator:
         unsupported: list[str] = []
         for op in plan.ops:
             if op.op not in REBUILD_OPS:
-                unsupported.append(f"op '{op.op}' has no interchange/rebuild path — do it in a live "
-                                   f"editor (e.g. add a transition in the NLE)")
+                if op.op == "speed_ramp":
+                    # Honest refusal: OTIO's only retime schema (LinearTimeWarp) is a single constant
+                    # time_scalar — it cannot carry a variable-speed curve, and no interchange format
+                    # round-trips one. Collapsing the ramp to a flat retime would be a fabrication, so
+                    # we refuse instead. (A constant speed change is the 'retime' op.)
+                    unsupported.append(
+                        "op 'speed_ramp' has no portable variable-speed mechanism — OTIO/interchange "
+                        "carry only a constant time-warp, not a speed curve. Use 'retime' for a "
+                        "constant speed, or build the ramp manually (Resolve Retime Curve / Premiere "
+                        "Time Remapping).")
+                else:
+                    unsupported.append(f"op '{op.op}' has no interchange/rebuild path — do it in a "
+                                       f"live editor (e.g. add a transition in the NLE)")
                 continue
             applied.append(getattr(self, f"_{op.op}")(op))
             self._attach_rationale(op)

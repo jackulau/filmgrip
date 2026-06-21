@@ -29,6 +29,7 @@ Generated from `filmgrip.adapters.registry`. film-grip surfaces these so it neve
 | ripple | rebuild | yes | yes |
 | delete | yes | yes | yes |
 | retime | rebuild | yes | yes |
+| speed_ramp | no | no | no (do in editor) |
 | add_marker | yes | yes | yes |
 | set_property | yes | yes | yes (metadata) |
 | set_enabled | yes | yes | yes |
