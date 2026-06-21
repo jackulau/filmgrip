@@ -243,6 +243,16 @@ def analyze_motion(media_path: str, clip: Any = None, *, fps: float = 4) -> dict
         duration = float(clip.duration) / src_rate if src_rate > 0 else None
         base_timeline_frame = int(clip.start)
 
+    # Offline / unresolvable media is an honest error with a curated reason (parity with
+    # music/acoustic), not ffmpeg's raw stderr.
+    if not media_path or not os.path.isfile(media_path):
+        return {
+            "fps": fps, "frames": "timeline" if base_timeline_frame is not None else "sample",
+            "n_frames": 0, "boundaries_frames": [], "motion": {}, "stability": None,
+            "errors": [f"{getattr(clip, 'id', '?') if clip is not None else media_path}: source media "
+                       f"not found ('{media_path}') — offline/proxy-only media cannot be analyzed"],
+        }
+
     frames = _extract_frames(media_path, fps=fps, ss=ss, duration=duration)
     series = motion_series(frames)
     sample_boundaries = scene_boundaries(series, fps)
