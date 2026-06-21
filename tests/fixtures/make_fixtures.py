@@ -13,6 +13,19 @@ import opentimelineio as otio
 RATE = 24.0
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Generated binary media lives here. It is .gitignore'd and regenerated locally
+# via this script — the repo keeps zero binary fixtures (CI has no ffmpeg to
+# decode them anyway; the pure-math tests carry the real coverage).
+MEDIA_DIR = os.path.join(HERE, "media")
+
+# Ground-truth each media file encodes, for the perception integration tests
+# (D5 music tempo, D7 acoustic quiet-span, D8 motion scene-boundary).
+MEDIA_KNOWN = {
+    "click.wav": {"bpm": 120, "dur_s": 4.0, "sr": 22050},          # D5: tempo
+    "two_shot.mp4": {"boundary_s": 1.0, "fps": 24, "size": "160x120"},  # D8: scene cut
+    "quiet_span.wav": {"quiet_span_s": [1.0, 2.0], "sr": 22050},   # D7: silence span
+}
+
 
 def rt(frames: int) -> otio.opentime.RationalTime:
     return otio.opentime.RationalTime(frames, RATE)
@@ -227,6 +240,91 @@ def write_filmora() -> str:
     return out
 
 
+def _write_click_wav(path: str, *, bpm: int = 120, dur_s: float = 4.0, sr: int = 22050) -> str:
+    """A click track: a 20ms 1kHz sine burst at the start of every beat, silence otherwise.
+
+    Pure stdlib (``wave`` + ``math``), 16-bit mono, fully deterministic — no ffmpeg,
+    so it always generates and dodges ffmpeg's comma-escaping pain. Ground truth for
+    D5 tempo detection: beats land every ``60/bpm`` seconds (0.5s at 120 BPM).
+    """
+    import math
+    import struct
+    import wave
+
+    period_s = 60.0 / bpm
+    burst_s = 0.020
+    total_n = int(round(dur_s * sr))
+    samples = bytearray()
+    for i in range(total_n):
+        local = (i / sr) % period_s  # time since the start of the current beat
+        if local < burst_s:
+            # 1kHz sine, half-scale, Hann-windowed so each burst is a clean transient
+            amp = 0.5 * math.sin(2.0 * math.pi * 1000.0 * local)
+            window = 0.5 * (1.0 - math.cos(2.0 * math.pi * (local / burst_s)))
+            val = int(max(-1.0, min(1.0, amp * window)) * 32767)
+        else:
+            val = 0
+        samples += struct.pack("<h", val)
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(bytes(samples))
+    return path
+
+
+def write_media_fixtures() -> list[str]:
+    """Emit tiny media with KNOWN properties for the perception integration tests.
+
+    Always writes ``click.wav`` (stdlib, deterministic). If ffmpeg is on PATH,
+    also writes ``two_shot.mp4`` (hard scene cut at 1.0s) and ``quiet_span.wav``
+    (silence 1.0-2.0s). When ffmpeg is absent, prints a skip note and returns only
+    the click track so the script always exits 0 (CI has no ffmpeg).
+    """
+    import shutil
+    import subprocess
+
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    written: list[str] = []
+
+    click = _write_click_wav(os.path.join(MEDIA_DIR, "click.wav"))
+    written.append(click)
+    print(f"wrote {click}")
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print("skipped two_shot.mp4 + quiet_span.wav: ffmpeg not on PATH "
+              "(regenerate locally with ffmpeg installed)")
+        return written
+
+    two_shot = os.path.join(MEDIA_DIR, "two_shot.mp4")
+    subprocess.run(
+        [ffmpeg, "-y", "-v", "error",
+         "-f", "lavfi", "-i", "color=c=black:s=160x120:r=24:d=1",
+         "-f", "lavfi", "-i", "color=c=white:s=160x120:r=24:d=1",
+         "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+         "-map", "[v]", "-pix_fmt", "yuv420p", two_shot],
+        check=True,
+    )
+    written.append(two_shot)
+    print(f"wrote {two_shot}")
+
+    quiet = os.path.join(MEDIA_DIR, "quiet_span.wav")
+    subprocess.run(
+        [ffmpeg, "-y", "-v", "error",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1:sample_rate=22050",
+         "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono:d=1",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1:sample_rate=22050",
+         "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1[a]",
+         "-map", "[a]", "-ar", "22050", "-ac", "1", quiet],
+        check=True,
+    )
+    written.append(quiet)
+    print(f"wrote {quiet}")
+
+    return written
+
+
 def main() -> None:
     tl = build_cut()
     out = os.path.join(HERE, "cut.otio")
@@ -247,6 +345,10 @@ def main() -> None:
     for p in write_capcut():
         print(f"wrote {p}")
     print(f"wrote {write_filmora()}")
+    try:
+        write_media_fixtures()  # prints each path (or a skip note if ffmpeg is absent)
+    except Exception as exc:  # never let optional media gen change the exit code
+        print(f"skipped write_media_fixtures: {exc}")
 
 
 if __name__ == "__main__":
