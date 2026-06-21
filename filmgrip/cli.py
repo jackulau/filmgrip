@@ -94,8 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("editors", help="print the editor capability matrix (what film-grip can/can't do)")
 
-    st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor (the doctor)")
+    st = sub.add_parser("status", help="diagnose whether film-grip can reach your editor and whether "
+                                       "the perception toolchain (ffmpeg/numpy/ASR) is installed (the doctor)")
     st.add_argument("--sfx-dir", dest="sfx_dir", help="SFX folder to report (default: ~/.filmgrip/sfx)")
+    st.add_argument("--json", action="store_true",
+                    help="emit the full report as machine-readable JSON (for agents/CI)")
+    st.add_argument("--exit-code", dest="exit_code", action="store_true",
+                    help="return a non-zero exit code if a hard blocker is present (default: always 0)")
 
     panel = sub.add_parser("panel", help="install the in-Resolve panel (Workspace ▸ Scripts ▸ film-grip)")
     panel.add_argument("panel_action", nargs="?", choices=["install"], default="install")
