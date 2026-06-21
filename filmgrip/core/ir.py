@@ -8,7 +8,6 @@ ID so Claude can reference clips without indices or names that drift.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -17,9 +16,14 @@ import opentimelineio as otio
 from .idmap import IdMap
 
 
-@dataclass
+@dataclass(slots=True)
 class Clip:
-    """A flattened view of one OTIO item with film-grip's stable ID attached."""
+    """A flattened view of one OTIO item with film-grip's stable ID attached.
+
+    ``slots=True``: a Clip is minted once per item on every timeline snapshot (``from_otio`` runs each
+    turn), so the per-instance dict overhead is real churn on large timelines. Slots cut construction +
+    attribute-access cost and memory; no code sets an attribute outside the declared fields.
+    """
 
     track_kind: str            # "video" | "audio"
     track_index: int           # 1-based, in track order
@@ -55,7 +59,9 @@ def media_ref_string(item: Any) -> str:
     if mr is not None:
         url = getattr(mr, "target_url", None)
         if url:
-            return os.path.basename(url)
+            # Inline basename: media URLs are posix/file paths; rsplit avoids posixpath.basename's
+            # call overhead, which the profile flagged as a per-clip hot spot in the IR build.
+            return url.rsplit("/", 1)[-1]
         if getattr(mr, "name", None):
             return mr.name
     return getattr(item, "name", "") or ""
