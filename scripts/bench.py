@@ -28,72 +28,23 @@ import cProfile
 import io
 import json
 import pstats
-import statistics
 import sys
-import time
-from typing import Callable
-
-import opentimelineio as otio
 
 from filmgrip.core.ir import TimelineIR
 from filmgrip.serialize import fgx
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover - numpy is an optional extra
-    np = None
-
-RATE = 24.0
-CLIP_FRAMES = 48
-
-
-def _rt(frames: int) -> otio.opentime.RationalTime:
-    return otio.opentime.RationalTime(frames, RATE)
-
-
-def make_timeline(n_clips: int, *, tracks: int = 1) -> otio.schema.Timeline:
-    """A synthetic timeline: ``tracks`` video tracks each carrying ``n_clips`` back-to-back clips."""
-    tl = otio.schema.Timeline(name="bench")
-    tl.global_start_time = _rt(0)
-    for t in range(tracks):
-        v = otio.schema.Track(name=f"V{t + 1}", kind=otio.schema.TrackKind.Video)
-        for i in range(n_clips):
-            v.append(otio.schema.Clip(
-                name=f"c{t}_{i}",
-                media_reference=otio.schema.ExternalReference(target_url=f"/media/{t}_{i}.mov"),
-                source_range=otio.opentime.TimeRange(_rt(0), _rt(CLIP_FRAMES)),
-            ))
-        tl.tracks.append(v)
-    return tl
-
-
-def make_frame(h: int, w: int):
-    """A deterministic H×W×3 uint8 gradient frame (no randomness, so timings are reproducible)."""
-    ramp_x = (np.linspace(0, 255, w, dtype=np.float64))[None, :]
-    ramp_y = (np.linspace(0, 255, h, dtype=np.float64))[:, None]
-    r = np.broadcast_to(ramp_x, (h, w))
-    g = np.broadcast_to(ramp_y, (h, w))
-    b = ((ramp_x + ramp_y) / 2.0)
-    return np.stack([r, np.broadcast_to(g, (h, w)), np.broadcast_to(b, (h, w))], axis=2).astype(np.uint8)
-
-
-def make_transcript(n_words: int):
-    from filmgrip.perception.transcribe import Transcript, Word
-    words = [Word(text=f"word{i}", start=i * 0.4, end=i * 0.4 + 0.35) for i in range(n_words)]
-    return Transcript(media_path="/media/clip.mov", backend="fake", words=words,
-                      duration_s=n_words * 0.4)
-
-
-def timeit(fn: Callable[[], object], *, repeats: int = 7, warmup: int = 1) -> float:
-    """Median wall-clock milliseconds over ``repeats`` runs (after ``warmup`` discarded runs)."""
-    for _ in range(warmup):
-        fn()
-    samples = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
-        fn()
-        samples.append((time.perf_counter() - t0) * 1000.0)
-    return statistics.median(samples)
+# Reusable timing + hot-path fixtures live in the importable core so this human harness and the
+# regression test (tests/test_bench_guard.py) share one implementation. ``timeit`` and
+# ``make_timeline`` are the historical names this script uses; they alias the core helpers.
+from filmgrip.bench import (
+    CLIP_FRAMES,
+    RATE,
+    build_timeline as make_timeline,
+    make_frame,
+    make_transcript,
+    median_ms as timeit,
+    np,
+)
 
 
 def bench() -> list[dict]:
